@@ -9,18 +9,21 @@ import SwiftUI
 
 struct ContentView: View {
     var body: some View {
-        VStack(spacing: 16) {
-            Button("Premium") {
-                // TODO: Handle Premium action
-            }
-            .buttonStyle(.borderedProminent)
+        NavigationStack {
+            VStack(spacing: 16) {
+                NavigationLink("Premium") {
+                    PremiumLoginView()
+                }
+                .buttonStyle(.borderedProminent)
 
-            Button("Standard") {
-                // TODO: Handle Standard action
+                NavigationLink("Standard") {
+                    StandardHomeView()
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
+            .padding()
+            .navigationTitle("Choose Plan")
         }
-        .padding()
     }
 }
 
