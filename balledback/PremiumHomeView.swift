@@ -9,6 +9,7 @@ import SwiftUI
 
 struct PremiumHomeView: View {
     @State private var goToEstimator = false
+    @EnvironmentObject private var store: EstimatorStore
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -18,6 +19,29 @@ struct PremiumHomeView: View {
                     .bold()
                 Text("This is a placeholder for the premium experience.")
                     .foregroundStyle(.secondary)
+
+                // Display saved premium estimates
+                if !store.premiumEstimates.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Saved Estimates")
+                            .font(.headline)
+                        ForEach(store.premiumEstimates) { estimate in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(estimate.jobName).font(.subheadline.weight(.semibold))
+                                if !estimate.jobLocation.isEmpty {
+                                    Text(estimate.jobLocation).foregroundStyle(.secondary)
+                                }
+                                if !estimate.phoneNumber.isEmpty {
+                                    Text(estimate.phoneNumber).foregroundStyle(.secondary)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                            .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             .padding()
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -38,11 +62,11 @@ struct PremiumHomeView: View {
         }
         .navigationTitle("Premium")
         .navigationDestination(isPresented: $goToEstimator) {
-            EstimatorMainView()
+            EstimatorMainView(source: .premium)
         }
     }
 }
 
 #Preview {
-    NavigationStack { PremiumHomeView() }
+    NavigationStack { PremiumHomeView().environmentObject(EstimatorStore()) }
 }

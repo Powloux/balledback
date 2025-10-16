@@ -9,9 +9,12 @@ import SwiftUI
 
 @main
 struct balledbackApp: App {
+    @StateObject private var estimatorStore = EstimatorStore()
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(estimatorStore)
         }
     }
 }

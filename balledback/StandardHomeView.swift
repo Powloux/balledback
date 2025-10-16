@@ -9,14 +9,34 @@ import SwiftUI
 
 struct StandardHomeView: View {
     @State private var goToEstimator = false
+    @EnvironmentObject private var store: EstimatorStore
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             // Scrollable content area; add your future content here
             ScrollView {
-                // Placeholder for future content; keeps area scrollable
                 VStack(alignment: .leading, spacing: 16) {
-                    // Add sections, lists, etc. here as you build features
+                    // Display saved standard estimates
+                    if !store.standardEstimates.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Saved Estimates")
+                                .font(.headline)
+                            ForEach(store.standardEstimates) { estimate in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(estimate.jobName).font(.subheadline.weight(.semibold))
+                                    if !estimate.jobLocation.isEmpty {
+                                        Text(estimate.jobLocation).foregroundStyle(.secondary)
+                                    }
+                                    if !estimate.phoneNumber.isEmpty {
+                                        Text(estimate.phoneNumber).foregroundStyle(.secondary)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(12)
+                                .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+                            }
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding()
@@ -38,11 +58,11 @@ struct StandardHomeView: View {
         }
         .navigationTitle("Standard")
         .navigationDestination(isPresented: $goToEstimator) {
-            EstimatorMainView()
+            EstimatorMainView(source: .standard)
         }
     }
 }
 
 #Preview {
-    NavigationStack { StandardHomeView() }
+    NavigationStack { StandardHomeView().environmentObject(EstimatorStore()) }
 }

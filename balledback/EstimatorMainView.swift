@@ -99,6 +99,13 @@ final class LocalSearchCompleterModel: NSObject, ObservableObject, MKLocalSearch
 }
 
 struct EstimatorMainView: View {
+    // Breadcrumb: where the user came from
+    let source: EstimatorSource
+
+    // Shared store
+    @EnvironmentObject private var store: EstimatorStore
+    @Environment(\.dismiss) private var dismiss
+
     @State private var jobName: String = ""
     @State private var phoneNumber: String = ""
     @State private var jobLocation: String = ""
@@ -109,6 +116,13 @@ struct EstimatorMainView: View {
 
     // Control suggestions visibility
     @State private var showSuggestions = false
+
+    // Enable Save if either job name OR job location has content
+    private var canSave: Bool {
+        let trimmedJobName = jobName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedLocation = jobLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmedJobName.isEmpty || !trimmedLocation.isEmpty
+    }
 
     var body: some View {
         ScrollView {
@@ -218,6 +232,28 @@ struct EstimatorMainView: View {
 
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
+                // Save button
+                Button {
+                    let estimate = Estimate(
+                        jobName: jobName.trimmingCharacters(in: .whitespacesAndNewlines),
+                        phoneNumber: phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines),
+                        jobLocation: jobLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+                    )
+                    store.add(estimate, from: source)
+                    dismiss()
+                } label: {
+                    Text("Save")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(
+                            Capsule().fill(Color.blue)
+                        )
+                        .accessibilityLabel("Save estimate")
+                }
+                .disabled(!canSave)
+
                 // Red Clear pill button (now left of the settings icon)
                 Button {
                     // Clear all estimator inputs
@@ -257,5 +293,5 @@ struct EstimatorMainView: View {
 }
 
 #Preview {
-    NavigationStack { EstimatorMainView() }
+    NavigationStack { EstimatorMainView(source: .standard).environmentObject(EstimatorStore()) }
 }
