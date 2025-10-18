@@ -9,6 +9,7 @@ import SwiftUI
 import MapKit
 import CoreLocation
 import Combine
+import UIKit
 
 // Simple location manager to get a one-time region for biasing search.
 final class OneShotLocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
@@ -23,7 +24,7 @@ final class OneShotLocationManager: NSObject, ObservableObject, CLLocationManage
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
     }
-
+    
     func request() {
         guard !didRequest else { return }
         didRequest = true
@@ -101,14 +102,25 @@ struct EstimatorMainView: View {
     @EnvironmentObject private var store: EstimatorStore
     @Environment(\.dismiss) private var dismiss
 
+    // Basic details
     @State private var jobName: String = ""
     @State private var phoneNumber: String = ""
     @State private var jobLocation: String = ""
 
-    // Keep the initial values to detect unsaved changes
+    // Window category counts (2x2 grid)
+    @State private var groundCount: Int = 0
+    @State private var secondCount: Int = 0
+    @State private var threePlusCount: Int = 0
+    @State private var basementCount: Int = 0
+
+    // Initial snapshots for dirty detection
     @State private var initialJobName: String = ""
     @State private var initialPhoneNumber: String = ""
     @State private var initialJobLocation: String = ""
+    @State private var initialGroundCount: Int = 0
+    @State private var initialSecondCount: Int = 0
+    @State private var initialThreePlusCount: Int = 0
+    @State private var initialBasementCount: Int = 0
 
     // Location and search models
     @StateObject private var locationManager = OneShotLocationManager()
@@ -127,7 +139,7 @@ struct EstimatorMainView: View {
         return !trimmedJobName.isEmpty || !trimmedLocation.isEmpty
     }
 
-    // Dirty check: any changes compared to initial values
+    // Dirty check: any changes compared to initial values (including counts)
     private var isDirty: Bool {
         let j = jobName.trimmingCharacters(in: .whitespacesAndNewlines)
         let p = phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -137,12 +149,18 @@ struct EstimatorMainView: View {
         let ip = initialPhoneNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         let il = initialJobLocation.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        return j != ij || p != ip || l != il
+        return j != ij
+            || p != ip
+            || l != il
+            || groundCount != initialGroundCount
+            || secondCount != initialSecondCount
+            || threePlusCount != initialThreePlusCount
+            || basementCount != initialBasementCount
     }
 
     init(source: EstimatorSource, existingEstimate: Estimate? = nil) {
         self.source = source
-        self.existingEstimate = existingEstimate
+               self.existingEstimate = existingEstimate
     }
 
     var body: some View {
@@ -237,13 +255,49 @@ struct EstimatorMainView: View {
                         )
                     }
                 }
+
+                // Window Categories (2x2 grid of tiles)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Window Categories")
+                        .font(.headline)
+
+                    // Use adaptive columns with a minimum width to guarantee side gutters.
+                    // Inter-item spacing (horizontal) and row spacing (vertical) provide visible gaps between tiles.
+                    let columns = [
+                        GridItem(.adaptive(minimum: 180), spacing: 20, alignment: .top)
+                    ]
+
+                    LazyVGrid(columns: columns, alignment: .center, spacing: 20) {
+                        categoryTile(
+                            title: "Ground Level",
+                            count: $groundCount,
+                            color: .blue
+                        )
+                        categoryTile(
+                            title: "Second Story",
+                            count: $secondCount,
+                            color: .teal
+                        )
+                        categoryTile(
+                            title: "3+ Story",
+                            count: $threePlusCount,
+                            color: .purple
+                        )
+                        categoryTile(
+                            title: "Basement",
+                            count: $basementCount,
+                            color: .indigo
+                        )
+                    }
+                    .padding(.top, 2) // tiny breathing room from the section header
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
         }
         .navigationTitle(existingEstimate == nil ? "" : "Edit Estimate")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(true) // we’ll provide our own back behavior
+        .navigationBarBackButtonHidden(true)
 
         .onAppear {
             // Prefill fields when editing and capture initial values
@@ -251,11 +305,22 @@ struct EstimatorMainView: View {
                 jobName = estimate.jobName
                 phoneNumber = estimate.phoneNumber
                 jobLocation = estimate.jobLocation
+
+                groundCount = estimate.groundCount
+                secondCount = estimate.secondCount
+                threePlusCount = estimate.threePlusCount
+                basementCount = estimate.basementCount
             }
+
             // Capture initial values for dirty checking
             initialJobName = jobName
             initialPhoneNumber = phoneNumber
             initialJobLocation = jobLocation
+
+            initialGroundCount = groundCount
+            initialSecondCount = secondCount
+            initialThreePlusCount = threePlusCount
+            initialBasementCount = basementCount
 
             // Request user location once to bias results
             locationManager.request()
@@ -303,6 +368,11 @@ struct EstimatorMainView: View {
                     jobName = ""
                     phoneNumber = ""
                     jobLocation = ""
+                    groundCount = 0
+                    secondCount = 0
+                    threePlusCount = 0
+                    basementCount = 0
+
                     searchModel.query = ""
                     showSuggestions = false
                 } label: {
@@ -347,10 +417,117 @@ struct EstimatorMainView: View {
         }
     }
 
+    // MARK: - Tile Builder
+
+    @ViewBuilder
+    private func categoryTile(title: String, count: Binding<Int>, color: Color) -> some View {
+        VStack(spacing: 10) {
+            Text(title)
+                .font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Spacer(minLength: 6)
+
+            // Controls row: − [count] +
+            HStack(spacing: 12) {
+                Button {
+                    if count.wrappedValue > 0 {
+                        count.wrappedValue -= 1
+                    }
+                } label: {
+                    Image(systemName: "minus")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 36)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+                }
+
+                // Editable count field (fixed width to avoid layout overflow)
+                EditableCountField(count: count)
+                    .frame(width: 60)
+
+                Button {
+                    count.wrappedValue += 1
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 36)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(.systemBackground))
+                .shadow(color: .black.opacity(0.07), radius: 6, x: 0, y: 3)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(color.opacity(0.25), lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+    }
+
+    // Small helper view to edit an Int count with numeric keyboard and validation
+    private struct EditableCountField: View {
+        @Binding var count: Int
+        @State private var text: String = ""
+        @FocusState private var isFocused: Bool
+
+        var body: some View {
+            TextField("0", text: Binding(
+                get: {
+                    if text.isEmpty { return String(count) }
+                    return text
+                },
+                set: { newValue in
+                    let digits = newValue.filter { $0.isNumber }
+                    text = digits
+                    if let val = Int(digits) {
+                        count = max(0, val)
+                    } else if digits.isEmpty {
+                        count = 0
+                    }
+                }
+            ))
+            .keyboardType(.numberPad)
+            .focused($isFocused)
+            .multilineTextAlignment(.center)
+            .font(.system(size: 22, weight: .bold, design: .rounded))
+            .frame(minWidth: 50)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .onAppear {
+                text = String(count)
+            }
+            .onChange(of: count) { _, newValue in
+                let current = Int(text) ?? 0
+                if current != newValue {
+                    text = String(newValue)
+                }
+            }
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        isFocused = false
+                    }
+                    .font(.headline)
+                }
+            }
+            .accessibilityLabel("Quantity")
+        }
+    }
+
     // MARK: - Save helper
 
     private func finalizeAndDismiss(save: Bool) {
-        // Stabilize before dismiss: stop completer updates and hide suggestions
         showSuggestions = false
         searchModel.query = ""
 
@@ -362,7 +539,11 @@ struct EstimatorMainView: View {
         let trimmed = Estimate(
             jobName: jobName.trimmingCharacters(in: .whitespacesAndNewlines),
             phoneNumber: phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines),
-            jobLocation: jobLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+            jobLocation: jobLocation.trimmingCharacters(in: .whitespacesAndNewlines),
+            groundCount: groundCount,
+            secondCount: secondCount,
+            threePlusCount: threePlusCount,
+            basementCount: basementCount
         )
 
         if let existing = existingEstimate {
