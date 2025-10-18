@@ -28,5 +28,7 @@ struct ContentView: View {
 }
 
 #Preview {
+    // Inject the required environment object so navigating in Canvas doesn't crash
     ContentView()
+        .environmentObject(EstimatorStore())
 }

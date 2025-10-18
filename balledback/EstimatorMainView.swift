@@ -234,6 +234,10 @@ struct EstimatorMainView: View {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 // Save button
                 Button {
+                    // B) Stabilize before dismiss: stop completer updates and hide suggestions
+                    showSuggestions = false
+                    searchModel.query = ""
+
                     let estimate = Estimate(
                         jobName: jobName.trimmingCharacters(in: .whitespacesAndNewlines),
                         phoneNumber: phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -260,6 +264,8 @@ struct EstimatorMainView: View {
                     jobName = ""
                     phoneNumber = ""
                     jobLocation = ""
+
+                    // Keep suggestions logic in sync
                     searchModel.query = ""
                     showSuggestions = false
                 } label: {
@@ -293,5 +299,9 @@ struct EstimatorMainView: View {
 }
 
 #Preview {
-    NavigationStack { EstimatorMainView(source: .standard).environmentObject(EstimatorStore()) }
+    // A) Explicit preview that injects the required environment object
+    NavigationStack {
+        EstimatorMainView(source: .standard)
+            .environmentObject(EstimatorStore())
+    }
 }
