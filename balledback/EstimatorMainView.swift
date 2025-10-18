@@ -32,7 +32,6 @@ final class OneShotLocationManager: NSObject, ObservableObject, CLLocationManage
         case .notDetermined:
             manager.requestWhenInUseAuthorization()
         case .restricted, .denied:
-            // Keep going without location; region will remain nil
             break
         case .authorizedWhenInUse, .authorizedAlways:
             manager.requestLocation()
@@ -50,15 +49,11 @@ final class OneShotLocationManager: NSObject, ObservableObject, CLLocationManage
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let loc = locations.first else { return }
-        // Create a modest span to bias local results
         let span = MKCoordinateSpan(latitudeDelta: 0.2, longitudeDelta: 0.2)
         region = MKCoordinateRegion(center: loc.coordinate, span: span)
     }
 
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        // If location fails, we simply won't bias the search region.
-        // You could log or handle the error as needed.
-    }
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) { }
 }
 
 // Wrapper around MKLocalSearchCompleter for SwiftUI binding.
@@ -78,7 +73,6 @@ final class LocalSearchCompleterModel: NSObject, ObservableObject, MKLocalSearch
         if let region {
             completer.region = region
         }
-        // Prioritize addresses
         completer.resultTypes = [.address]
     }
 
@@ -93,7 +87,6 @@ final class LocalSearchCompleterModel: NSObject, ObservableObject, MKLocalSearch
     }
 
     func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
-        // Clear results on error; you could also show an error message if desired.
         results = []
     }
 }
@@ -112,6 +105,11 @@ struct EstimatorMainView: View {
     @State private var phoneNumber: String = ""
     @State private var jobLocation: String = ""
 
+    // Keep the initial values to detect unsaved changes
+    @State private var initialJobName: String = ""
+    @State private var initialPhoneNumber: String = ""
+    @State private var initialJobLocation: String = ""
+
     // Location and search models
     @StateObject private var locationManager = OneShotLocationManager()
     @StateObject private var searchModel = LocalSearchCompleterModel()
@@ -119,11 +117,27 @@ struct EstimatorMainView: View {
     // Control suggestions visibility
     @State private var showSuggestions = false
 
+    // Confirm discard/save draft
+    @State private var showDiscardDialog = false
+
     // Enable Save if either job name OR job location has content
     private var canSave: Bool {
         let trimmedJobName = jobName.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedLocation = jobLocation.trimmingCharacters(in: .whitespacesAndNewlines)
         return !trimmedJobName.isEmpty || !trimmedLocation.isEmpty
+    }
+
+    // Dirty check: any changes compared to initial values
+    private var isDirty: Bool {
+        let j = jobName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let p = phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        let l = jobLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let ij = initialJobName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ip = initialPhoneNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        let il = initialJobLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return j != ij || p != ip || l != il
     }
 
     init(source: EstimatorSource, existingEstimate: Estimate? = nil) {
@@ -157,7 +171,6 @@ struct EstimatorMainView: View {
                         .submitLabel(.done)
                         .textFieldStyle(.roundedBorder)
                         .onChange(of: phoneNumber) { _, newValue in
-                            // Keep only digits 0-9
                             let filtered = newValue.filter { $0.isNumber }
                             if filtered != newValue {
                                 phoneNumber = filtered
@@ -182,11 +195,9 @@ struct EstimatorMainView: View {
                     }
 
                     if showSuggestions && !searchModel.results.isEmpty {
-                        // Suggestions list
                         VStack(spacing: 0) {
                             ForEach(searchModel.results, id: \.self) { item in
                                 Button {
-                                    // Fill the text field with a readable combination
                                     let combined = item.title.isEmpty ? item.subtitle : "\(item.title) \(item.subtitle)"
                                     jobLocation = combined.trimmingCharacters(in: .whitespacesAndNewlines)
                                     showSuggestions = false
@@ -210,7 +221,6 @@ struct EstimatorMainView: View {
                                 }
                                 .buttonStyle(.plain)
 
-                                // Divider between rows
                                 if item != searchModel.results.last {
                                     Divider()
                                 }
@@ -231,47 +241,50 @@ struct EstimatorMainView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
         }
-        // Keep the nav bar for toolbar items, but hide the title text
         .navigationTitle(existingEstimate == nil ? "" : "Edit Estimate")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true) // we’ll provide our own back behavior
 
         .onAppear {
-            // Prefill fields when editing
+            // Prefill fields when editing and capture initial values
             if let estimate = existingEstimate {
                 jobName = estimate.jobName
                 phoneNumber = estimate.phoneNumber
                 jobLocation = estimate.jobLocation
             }
+            // Capture initial values for dirty checking
+            initialJobName = jobName
+            initialPhoneNumber = phoneNumber
+            initialJobLocation = jobLocation
+
             // Request user location once to bias results
             locationManager.request()
         }
-        // Observe region updates without requiring Equatable conformance
         .onReceive(locationManager.$region.compactMap { $0 }) { newRegion in
             searchModel.update(region: newRegion)
         }
 
         .toolbar {
+            // Custom back button that asks to discard/save draft if dirty
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    if isDirty {
+                        showDiscardDialog = true
+                    } else {
+                        dismiss()
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.backward")
+                        Text("Back")
+                    }
+                }
+            }
+
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 // Save button
                 Button {
-                    // Stabilize before dismiss: stop completer updates and hide suggestions
-                    showSuggestions = false
-                    searchModel.query = ""
-
-                    let trimmed = Estimate(
-                        jobName: jobName.trimmingCharacters(in: .whitespacesAndNewlines),
-                        phoneNumber: phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines),
-                        jobLocation: jobLocation.trimmingCharacters(in: .whitespacesAndNewlines)
-                    )
-
-                    if let existing = existingEstimate {
-                        // Update existing
-                        store.update(id: existing.id, with: trimmed, from: source)
-                    } else {
-                        // Create new
-                        store.add(trimmed, from: source)
-                    }
-                    dismiss()
+                    finalizeAndDismiss(save: true)
                 } label: {
                     Text("Save")
                         .font(.subheadline.weight(.semibold))
@@ -285,14 +298,11 @@ struct EstimatorMainView: View {
                 }
                 .disabled(!canSave)
 
-                // Red Clear pill button (now left of the settings icon)
+                // Clear button
                 Button {
-                    // Clear all estimator inputs
                     jobName = ""
                     phoneNumber = ""
                     jobLocation = ""
-
-                    // Keep suggestions logic in sync
                     searchModel.query = ""
                     showSuggestions = false
                 } label: {
@@ -307,14 +317,10 @@ struct EstimatorMainView: View {
                         .accessibilityLabel("Clear all fields")
                 }
 
-                // Settings menu button (circle with 3 horizontal dots) — far right
+                // Settings menu (placeholder)
                 Menu {
-                    Button("Duplicate") {
-                        // Placeholder: duplicate current estimator data
-                    }
-                    Button("More settings to come") {
-                        // Placeholder for future settings
-                    }
+                    Button("Duplicate") {}
+                    Button("More settings to come") {}
                 } label: {
                     Image(systemName: "ellipsis.circle")
                         .font(.title3)
@@ -322,14 +328,55 @@ struct EstimatorMainView: View {
                 }
             }
         }
+
+        // Confirmation dialog for unsaved changes
+        .confirmationDialog(
+            "You have unsaved changes",
+            isPresented: $showDiscardDialog,
+            titleVisibility: .visible
+        ) {
+            Button("Save as Draft") {
+                finalizeAndDismiss(save: true)
+            }
+            Button("Discard Changes", role: .destructive) {
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Would you like to save your changes as a draft or discard them?")
+        }
+    }
+
+    // MARK: - Save helper
+
+    private func finalizeAndDismiss(save: Bool) {
+        // Stabilize before dismiss: stop completer updates and hide suggestions
+        showSuggestions = false
+        searchModel.query = ""
+
+        guard save else {
+            dismiss()
+            return
+        }
+
+        let trimmed = Estimate(
+            jobName: jobName.trimmingCharacters(in: .whitespacesAndNewlines),
+            phoneNumber: phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines),
+            jobLocation: jobLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+
+        if let existing = existingEstimate {
+            store.update(id: existing.id, with: trimmed, from: source)
+        } else {
+            store.add(trimmed, from: source)
+        }
+        dismiss()
     }
 }
 
 #Preview {
-    // Explicit preview that injects the required environment object
     NavigationStack {
         EstimatorMainView(source: .standard)
             .environmentObject(EstimatorStore())
     }
 }
-

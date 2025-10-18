@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct StandardHomeView: View {
     @State private var goToEstimator = false
@@ -16,6 +17,10 @@ struct StandardHomeView: View {
     @State private var recentlyDeletedIndex: Int?
     @State private var showUndoBanner = false
     @State private var undoTimer: Timer?
+
+    // Delete animation state
+    @State private var deletingID: UUID?
+    @State private var prePopID: UUID? // for tiny overshoot before pop
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -52,10 +57,32 @@ struct StandardHomeView: View {
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(.vertical, 6)
+                                    // Dramatic pop animation
+                                    .scaleEffect(prePopID == estimate.id ? 1.04 : (deletingID == estimate.id ? 0.65 : 1.0))
+                                    .rotationEffect(.degrees(deletingID == estimate.id ? 6 : 0))
+                                    .blur(radius: deletingID == estimate.id ? 2 : 0)
+                                    .opacity(deletingID == estimate.id ? 0.0 : 1.0)
+                                    .animation(.spring(response: 0.18, dampingFraction: 0.7), value: prePopID)
+                                    .animation(.spring(response: 0.16, dampingFraction: 0.65), value: deletingID)
                                 }
                                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                     Button(role: .destructive) {
-                                        deleteWithUndo(estimate)
+                                        // Haptic feedback
+                                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+
+                                        // Tiny overshoot, then dramatic pop
+                                        prePopID = estimate.id
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+                                            prePopID = nil
+                                            deletingID = estimate.id
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+                                                deleteWithUndo(estimate)
+                                                // Reset deletingID shortly after
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+                                                    deletingID = nil
+                                                }
+                                            }
+                                        }
                                     } label: {
                                         Label("Delete", systemImage: "trash")
                                     }
@@ -96,6 +123,19 @@ struct StandardHomeView: View {
         .navigationTitle("Standard")
         .navigationDestination(isPresented: $goToEstimator) {
             EstimatorMainView(source: .standard)
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    // Standard-specific settings will go here in the future
+                    Button("More settings to come") {}
+                        .disabled(true)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title3)
+                        .accessibilityLabel("Settings")
+                }
+            }
         }
         .onDisappear {
             invalidateUndoTimer()

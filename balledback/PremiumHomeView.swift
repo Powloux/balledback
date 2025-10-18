@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct PremiumHomeView: View {
     @State private var goToEstimator = false
@@ -16,6 +17,10 @@ struct PremiumHomeView: View {
     @State private var recentlyDeletedIndex: Int?
     @State private var showUndoBanner = false
     @State private var undoTimer: Timer?
+
+    // Delete animation state
+    @State private var deletingID: UUID?
+    @State private var prePopID: UUID?
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -56,10 +61,29 @@ struct PremiumHomeView: View {
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(.vertical, 6)
+                                    .scaleEffect(prePopID == estimate.id ? 1.04 : (deletingID == estimate.id ? 0.65 : 1.0))
+                                    .rotationEffect(.degrees(deletingID == estimate.id ? 6 : 0))
+                                    .blur(radius: deletingID == estimate.id ? 2 : 0)
+                                    .opacity(deletingID == estimate.id ? 0.0 : 1.0)
+                                    .animation(.spring(response: 0.18, dampingFraction: 0.7), value: prePopID)
+                                    .animation(.spring(response: 0.16, dampingFraction: 0.65), value: deletingID)
                                 }
                                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                     Button(role: .destructive) {
-                                        deleteWithUndo(estimate)
+                                        // Haptic feedback
+                                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+
+                                        prePopID = estimate.id
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+                                            prePopID = nil
+                                            deletingID = estimate.id
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+                                                deleteWithUndo(estimate)
+                                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+                                                    deletingID = nil
+                                                }
+                                            }
+                                        }
                                     } label: {
                                         Label("Delete", systemImage: "trash")
                                     }
@@ -92,7 +116,7 @@ struct PremiumHomeView: View {
                     onUndo: { performUndo() }
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-                .padding(.bottom, 92) // keep clear of the FAB
+                .padding(.bottom, 92)
                 .padding(.horizontal, 16)
             }
         }
@@ -100,6 +124,19 @@ struct PremiumHomeView: View {
         .navigationTitle("Premium")
         .navigationDestination(isPresented: $goToEstimator) {
             EstimatorMainView(source: .premium)
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    // Premium-specific settings will go here in the future
+                    Button("More settings to come") {}
+                        .disabled(true)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title3)
+                        .accessibilityLabel("Settings")
+                }
+            }
         }
         .onDisappear {
             invalidateUndoTimer()
@@ -109,7 +146,6 @@ struct PremiumHomeView: View {
     // MARK: - Undo Helpers
 
     private func deleteWithUndo(_ estimate: Estimate) {
-        // Capture original index to support precise reinsertion
         if let idx = store.premiumEstimates.firstIndex(where: { $0.id == estimate.id }) {
             recentlyDeletedIndex = idx
         } else {
@@ -117,25 +153,18 @@ struct PremiumHomeView: View {
         }
 
         recentlyDeleted = estimate
-
-        // Perform deletion
         store.remove(id: estimate.id, from: .premium)
-
-        // Show banner and start/reset timer
         showUndoBanner = true
         restartUndoTimer()
     }
 
     private func performUndo() {
         guard let estimate = recentlyDeleted else { return }
-
-        // Reinsert at original index if possible; else append
         if let idx = recentlyDeletedIndex, idx <= store.premiumEstimates.count {
             store.insert(estimate, at: idx, for: .premium)
         } else {
             store.append(estimate, for: .premium)
         }
-
         clearUndoState(animated: true)
     }
 
@@ -154,11 +183,9 @@ struct PremiumHomeView: View {
 
     private func restartUndoTimer() {
         invalidateUndoTimer()
-        // Show for ~4 seconds
         undoTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { _ in
             clearUndoState(animated: true)
         }
-        // Ensure timer continues during scrolling
         RunLoop.main.add(undoTimer!, forMode: .common)
     }
 
