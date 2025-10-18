@@ -139,16 +139,23 @@ struct EstimatorMainView: View {
                         .textFieldStyle(.roundedBorder)
                 }
 
-                // Phone Number input (same style as Job Name)
+                // Phone Number input (digits only)
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Phone Number")
                         .font(.headline)
 
                     TextField("Enter phone number", text: $phoneNumber)
-                        .keyboardType(.phonePad)
+                        .keyboardType(.numberPad)
                         .textInputAutocapitalization(.never)
                         .submitLabel(.done)
                         .textFieldStyle(.roundedBorder)
+                        .onChange(of: phoneNumber) { _, newValue in
+                            // Keep only digits 0-9
+                            let filtered = newValue.filter { $0.isNumber }
+                            if filtered != newValue {
+                                phoneNumber = filtered
+                            }
+                        }
                 }
 
                 // Job Location input with suggestions
@@ -271,7 +278,7 @@ struct EstimatorMainView: View {
                 } label: {
                     Text("Clear")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
+                    .foregroundStyle(.white)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
                         .background(
