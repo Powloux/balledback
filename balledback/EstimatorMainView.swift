@@ -101,6 +101,8 @@ final class LocalSearchCompleterModel: NSObject, ObservableObject, MKLocalSearch
 struct EstimatorMainView: View {
     // Breadcrumb: where the user came from
     let source: EstimatorSource
+    // Optional existing estimate for edit mode
+    let existingEstimate: Estimate?
 
     // Shared store
     @EnvironmentObject private var store: EstimatorStore
@@ -122,6 +124,11 @@ struct EstimatorMainView: View {
         let trimmedJobName = jobName.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedLocation = jobLocation.trimmingCharacters(in: .whitespacesAndNewlines)
         return !trimmedJobName.isEmpty || !trimmedLocation.isEmpty
+    }
+
+    init(source: EstimatorSource, existingEstimate: Estimate? = nil) {
+        self.source = source
+        self.existingEstimate = existingEstimate
     }
 
     var body: some View {
@@ -225,10 +232,16 @@ struct EstimatorMainView: View {
             .padding()
         }
         // Keep the nav bar for toolbar items, but hide the title text
-        .navigationTitle("")
+        .navigationTitle(existingEstimate == nil ? "" : "Edit Estimate")
         .navigationBarTitleDisplayMode(.inline)
 
         .onAppear {
+            // Prefill fields when editing
+            if let estimate = existingEstimate {
+                jobName = estimate.jobName
+                phoneNumber = estimate.phoneNumber
+                jobLocation = estimate.jobLocation
+            }
             // Request user location once to bias results
             locationManager.request()
         }
@@ -241,16 +254,23 @@ struct EstimatorMainView: View {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 // Save button
                 Button {
-                    // B) Stabilize before dismiss: stop completer updates and hide suggestions
+                    // Stabilize before dismiss: stop completer updates and hide suggestions
                     showSuggestions = false
                     searchModel.query = ""
 
-                    let estimate = Estimate(
+                    let trimmed = Estimate(
                         jobName: jobName.trimmingCharacters(in: .whitespacesAndNewlines),
                         phoneNumber: phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines),
                         jobLocation: jobLocation.trimmingCharacters(in: .whitespacesAndNewlines)
                     )
-                    store.add(estimate, from: source)
+
+                    if let existing = existingEstimate {
+                        // Update existing
+                        store.update(id: existing.id, with: trimmed, from: source)
+                    } else {
+                        // Create new
+                        store.add(trimmed, from: source)
+                    }
                     dismiss()
                 } label: {
                     Text("Save")
@@ -278,7 +298,7 @@ struct EstimatorMainView: View {
                 } label: {
                     Text("Clear")
                         .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                        .foregroundStyle(.white)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
                         .background(
@@ -306,9 +326,10 @@ struct EstimatorMainView: View {
 }
 
 #Preview {
-    // A) Explicit preview that injects the required environment object
+    // Explicit preview that injects the required environment object
     NavigationStack {
         EstimatorMainView(source: .standard)
             .environmentObject(EstimatorStore())
     }
 }
+
