@@ -83,10 +83,13 @@ struct StandardHomeView: View {
 
             // Undo banner overlay above the FAB
             if showUndoBanner, let deleted = recentlyDeleted {
-                undoBanner(for: deleted)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .padding(.bottom, 92) // keep clear of the FAB
-                    .padding(.horizontal, 16)
+                UndoBanner(
+                    title: "Deleted “\(deleted.jobName.isEmpty ? "Estimate" : deleted.jobName)”",
+                    onUndo: { performUndo() }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .padding(.bottom, 92) // keep clear of the FAB
+                .padding(.horizontal, 16)
             }
         }
         .animation(.spring(duration: 0.35), value: showUndoBanner)
@@ -158,42 +161,6 @@ struct StandardHomeView: View {
     private func invalidateUndoTimer() {
         undoTimer?.invalidate()
         undoTimer = nil
-    }
-
-    // MARK: - Banner View
-
-    @ViewBuilder
-    private func undoBanner(for estimate: Estimate) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "trash")
-                .foregroundStyle(.white)
-            Text("Deleted “\(estimate.jobName.isEmpty ? "Estimate" : estimate.jobName)”")
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .truncationMode(.tail)
-
-            Spacer()
-
-            Button("Undo") {
-                performUndo()
-            }
-            .font(.headline.weight(.semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                Capsule().fill(Color.white.opacity(0.2))
-            )
-            .accessibilityLabel("Undo delete")
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color.red)
-                .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
-        )
-        .accessibilityAddTraits(.isButton)
     }
 }
 
