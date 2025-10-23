@@ -113,6 +113,12 @@ struct EstimatorMainView: View {
     @State private var threePlusCount: Int = 0
     @State private var basementCount: Int = 0
 
+    // Per-tile price (per window)
+    @State private var groundPrice: Double = 0
+    @State private var secondPrice: Double = 0
+    @State private var threePlusPrice: Double = 0
+    @State private var basementPrice: Double = 0
+
     // Initial snapshots for dirty detection
     @State private var initialJobName: String = ""
     @State private var initialPhoneNumber: String = ""
@@ -135,8 +141,14 @@ struct EstimatorMainView: View {
     // New: alert for saving without a name
     @State private var showUnnamedSaveAlert = false
 
-    // Focus for job name field to bring it into focus when user chooses "Name"
+    // Focus for job name field
     @FocusState private var jobNameFocused: Bool
+
+    // Expansion state per tile
+    @State private var isGroundExpanded = false
+    @State private var isSecondExpanded = false
+    @State private var isThreePlusExpanded = false
+    @State private var isBasementExpanded = false
 
     // Enable Save if either job name OR job location OR phone OR any window count has content
     private var hasAnyCounts: Bool {
@@ -283,28 +295,36 @@ struct EstimatorMainView: View {
                         categoryTile(
                             title: "Ground Level",
                             count: $groundCount,
-                            color: .blue
+                            color: .blue,
+                            isExpanded: $isGroundExpanded,
+                            price: $groundPrice
                         )
                         .scaleEffect(0.95)
 
                         categoryTile(
                             title: "Second Story",
                             count: $secondCount,
-                            color: .teal
+                            color: .teal,
+                            isExpanded: $isSecondExpanded,
+                            price: $secondPrice
                         )
                         .scaleEffect(0.95)
 
                         categoryTile(
                             title: "3+ Story",
                             count: $threePlusCount,
-                            color: .purple
+                            color: .purple,
+                            isExpanded: $isThreePlusExpanded,
+                            price: $threePlusPrice
                         )
                         .scaleEffect(0.95)
 
                         categoryTile(
                             title: "Basement",
                             count: $basementCount,
-                            color: .indigo
+                            color: .indigo,
+                            isExpanded: $isBasementExpanded,
+                            price: $basementPrice
                         )
                         .scaleEffect(0.95)
                     }
@@ -459,8 +479,16 @@ struct EstimatorMainView: View {
     // MARK: - Tile Builder
 
     @ViewBuilder
-    private func categoryTile(title: String, count: Binding<Int>, color: Color) -> some View {
-        VStack(spacing: 6) {
+    private func categoryTile(
+        title: String,
+        count: Binding<Int>,
+        color: Color,
+        isExpanded: Binding<Bool>,
+        price: Binding<Double>
+    ) -> some View {
+        let collapsedHeight: CGFloat = 200
+
+        VStack(spacing: 8) {
             Text(title)
                 .font(.headline)
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -479,7 +507,6 @@ struct EstimatorMainView: View {
                         .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
                 }
 
-                // Editable count field (fixed width to avoid layout overflow)
                 EditableCountField(count: count)
                     .frame(width: 60)
 
@@ -492,18 +519,57 @@ struct EstimatorMainView: View {
                         .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
                 }
             }
-            .padding(.top, 20)
+            .padding(.top, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Advanced Modifiers button (placeholder for future dropdown)
+            // Price per window
+            HStack(spacing: 8) {
+                Text("Price per window")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                PriceField(value: price)
+                    .frame(width: 110)
+            }
+            .padding(.vertical, 4)
+
+            // Expanded advanced content placeholder (above the bottom button)
+            if isExpanded.wrappedValue {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Advanced options coming soon…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Label("Example toggle", systemImage: "slider.horizontal.3")
+                        Spacer()
+                        Toggle("", isOn: .constant(true))
+                            .labelsHidden()
+                    }
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color(.tertiarySystemBackground))
+                    )
+                }
+                .padding(.top, 2)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+                .animation(.easeInOut, value: isExpanded.wrappedValue)
+            }
+
+            // Bottom-aligned Advanced Modifiers button with slight padding
             Button {
-                // TODO: Expand/collapse advanced section
+                withAnimation(.easeInOut) {
+                    isExpanded.wrappedValue.toggle()
+                }
             } label: {
                 HStack(spacing: 6) {
                     Text("Advanced Modifiers")
                         .font(.subheadline.weight(.semibold))
                     Image(systemName: "chevron.down")
                         .font(.subheadline.weight(.semibold))
+                        .rotationEffect(.degrees(isExpanded.wrappedValue ? 180 : 0))
+                        .animation(.easeInOut(duration: 0.2), value: isExpanded.wrappedValue)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 6)
@@ -515,9 +581,15 @@ struct EstimatorMainView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Advanced Modifiers")
+            .padding(.top, 4)
         }
         .padding(10)
-        .frame(maxWidth: .infinity, minHeight: 200, alignment: .topLeading)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: collapsedHeight,
+            maxHeight: isExpanded.wrappedValue ? .infinity : collapsedHeight,
+            alignment: .topLeading
+        )
         .background(
             RoundedRectangle(cornerRadius: 14)
                 .fill(Color(.systemBackground))
@@ -582,6 +654,101 @@ struct EstimatorMainView: View {
                 }
             }
             .accessibilityLabel("Quantity")
+        }
+    }
+
+    // Numeric price field for Double with validation and "$0.00" default
+    private struct PriceField: View {
+        @Binding var value: Double
+        @State private var text: String = ""
+        @FocusState private var isFocused: Bool
+
+        var body: some View {
+            TextField("$0.00", text: Binding(
+                get: {
+                    if text.isEmpty { return currencyString(from: value) }
+                    return text
+                },
+                set: { newValue in
+                    // Allow optional leading "$", digits, and one decimal point.
+                    let filtered = filterCurrency(newValue)
+                    text = filtered
+                    let numeric = filtered.replacingOccurrences(of: "$", with: "")
+                    if let v = Double(numeric) {
+                        value = max(0, v)
+                    } else if numeric.isEmpty {
+                        value = 0
+                    }
+                }
+            ))
+            .keyboardType(.decimalPad)
+            .focused($isFocused)
+            .multilineTextAlignment(.trailing)
+            .font(.system(size: 18, weight: .semibold, design: .rounded))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .onAppear {
+                text = currencyString(from: value)
+            }
+            .onChange(of: value) { _, newValue in
+                let currentNumeric = Double(text.replacingOccurrences(of: "$", with: "")) ?? 0
+                if abs(currentNumeric - newValue) > 0.0001 {
+                    text = currencyString(from: newValue)
+                }
+            }
+            .onChange(of: isFocused) { _, focused in
+                // Reformat on focus loss to ensure "$x.xx"
+                if !focused {
+                    text = currencyString(from: value)
+                }
+            }
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        isFocused = false
+                    }
+                    .font(.headline)
+                }
+            }
+            .accessibilityLabel("Price per window")
+        }
+
+        private func currencyString(from v: Double) -> String {
+            // Always show $ with two decimals
+            return String(format: "$%.2f", v)
+        }
+
+        private func filterCurrency(_ s: String) -> String {
+            var result = ""
+            var hasDot = false
+            var hasDollar = false
+
+            for (i, ch) in s.enumerated() {
+                if ch == "$" && !hasDollar && i == 0 {
+                    result.append(ch)
+                    hasDollar = true
+                } else if ch.isNumber {
+                    result.append(ch)
+                } else if ch == "." && !hasDot {
+                    result.append(ch)
+                    hasDot = true
+                }
+            }
+
+            // Ensure leading "$"
+            if !result.hasPrefix("$") {
+                result = "$" + result
+            }
+            // Avoid lone "$" or "$."
+            if result == "$" || result == "$." {
+                result = "$0"
+            }
+            return result
         }
     }
 
