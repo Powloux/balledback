@@ -203,15 +203,7 @@ struct EstimatorMainView: View {
 
     var body: some View {
         ZStack {
-            // Global tap-to-dismiss visual overlay (non-blocking)
-            if anyUnitMenuOpen {
-                Rectangle()
-                    .fill(Color.clear)
-                    .contentShape(Rectangle())
-                    .ignoresSafeArea()
-                    .transition(.opacity)
-                    .allowsHitTesting(false) // do not block taps; we handle closing via the content gesture below
-            }
+            // Overlay removed for testing
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -369,18 +361,7 @@ struct EstimatorMainView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding()
-                // Global tap-to-dismiss: close menus when tapping outside dropdowns
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    if anyUnitMenuOpen {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            groundUnitMenuOpen = false
-                            secondUnitMenuOpen = false
-                            threePlusUnitMenuOpen = false
-                            basementUnitMenuOpen = false
-                        }
-                    }
-                }
+                // simultaneousGesture removed for testing
             }
         }
         .navigationTitle(existingEstimate == nil ? "" : "Edit Estimate")
@@ -537,6 +518,7 @@ struct EstimatorMainView: View {
         isUnitMenuOpen: Binding<Bool>
     ) -> some View {
         let collapsedHeight: CGFloat = 250
+        let dropdownTransition: AnyTransition = .opacity.combined(with: .move(edge: .top))
 
         VStack(spacing: 8) {
             Text(title)
@@ -545,153 +527,37 @@ struct EstimatorMainView: View {
                 .multilineTextAlignment(.center)
 
             // Controls row: − [count] +
-            HStack(spacing: 12) {
-                Button {
-                    if count.wrappedValue > 0 {
-                        count.wrappedValue -= 1
-                    }
-                } label: {
-                    Image(systemName: "minus")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 44, height: 36)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
-                }
-
-                EditableCountField(count: count)
-                    .frame(width: 60)
-
-                Button {
-                    count.wrappedValue += 1
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 44, height: 36)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
-                }
-            }
-            .padding(.top, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            CountControlsRow(count: count)
 
             // Price row: "Price Per…" button with dropdown + price field
             VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .center, spacing: 8) {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            isUnitMenuOpen.wrappedValue.toggle()
-                        }
-                    } label: {
-                        VStack(spacing: 2) {
-                            Text("Price Per…")
-                                .font(.subheadline.weight(.semibold))
-                                .multilineTextAlignment(.center)
-                                .lineLimit(nil)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Image(systemName: "chevron.down")
-                                .font(.subheadline.weight(.semibold))
-                                .rotationEffect(.degrees(isUnitMenuOpen.wrappedValue ? 180 : 0))
-                                .animation(.easeInOut(duration: 0.2), value: isUnitMenuOpen.wrappedValue)
-                        }
-                        .frame(minWidth: 0, idealWidth: 140, maxWidth: 160)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color(.secondarySystemBackground))
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    Spacer(minLength: 6)
-
-                    PriceField(value: price)
-                        .frame(minWidth: 76, idealWidth: 88, maxWidth: 110, alignment: .trailing)
-                }
+                PricePerRow(isUnitMenuOpen: isUnitMenuOpen, price: price)
 
                 if isUnitMenuOpen.wrappedValue {
-                    VStack(alignment: .leading, spacing: 8) {
-                        // Window row
-                        Button {
-                            unit.wrappedValue = .window
-                            // Keep menu open after selection
-                        } label: {
-                            HStack {
-                                Text("Window")
-                                    .font(.body)
-                                    .foregroundStyle(unit.wrappedValue == .window ? .white : .primary)
-                                Spacer()
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(unit.wrappedValue == .window ? Color.blue : Color.clear)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        // Consume taps so they don't bubble to the global onTapGesture
+                    UnitDropdownMenu(unit: unit)
+                        .padding(6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color(.systemBackground))
+                                .shadow(color: .black.opacity(0.1), radius: 6, x: 0, y: 3)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color(.separator), lineWidth: 0.5)
+                        )
+                        .transition(dropdownTransition)
+                        // Keep taps inside the dropdown local
                         .highPriorityGesture(TapGesture())
-
-                        // Pane row
-                        Button {
-                            unit.wrappedValue = .pane
-                            // Keep menu open after selection
-                        } label: {
-                            HStack {
-                                Text("Pane")
-                                    .font(.body)
-                                    .foregroundStyle(unit.wrappedValue == .pane ? .white : .primary)
-                                Spacer()
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(unit.wrappedValue == .pane ? Color.blue : Color.clear)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        // Consume taps so they don't bubble to the global onTapGesture
-                        .highPriorityGesture(TapGesture())
-                    }
-                    .padding(6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color(.systemBackground))
-                            .shadow(color: .black.opacity(0.1), radius: 6, x: 0, y: 3)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(Color(.separator), lineWidth: 0.5)
-                    )
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                    // Also consume taps anywhere in the dropdown container
-                    .highPriorityGesture(TapGesture())
                 }
             }
             .padding(.vertical, 4)
 
             // Expanded advanced content placeholder (above the bottom button)
             if isExpanded.wrappedValue {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Advanced options coming soon…")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-
-                    HStack {
-                        Label("Example toggle", systemImage: "slider.horizontal.3")
-                        Spacer()
-                        Toggle("", isOn: .constant(true))
-                            .labelsHidden()
-                    }
-                    .padding(10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color(.tertiarySystemBackground))
-                    )
-                }
-                .padding(.top, 2)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-                .animation(.easeInOut, value: isExpanded.wrappedValue)
+                AdvancedOptionsBlock()
+                    .padding(.top, 2)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .animation(.easeInOut, value: isExpanded.wrappedValue)
             }
 
             // Bottom-aligned Advanced Modifiers button with increased vertical size and stacked text
@@ -712,9 +578,10 @@ struct EstimatorMainView: View {
 
                     Spacer()
 
+                    let chevronRotation = Angle(degrees: isExpanded.wrappedValue ? 180 : 0)
                     Image(systemName: "chevron.down")
                         .font(.subheadline.weight(.semibold))
-                        .rotationEffect(.degrees(isExpanded.wrappedValue ? 180 : 0))
+                        .rotationEffect(chevronRotation)
                         .animation(.easeInOut(duration: 0.2), value: isExpanded.wrappedValue)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -748,6 +615,131 @@ struct EstimatorMainView: View {
         )
         .contentShape(Rectangle())
         .animation(.easeInOut(duration: 0.2), value: isUnitMenuOpen.wrappedValue)
+    }
+
+    // MARK: - Subviews extracted to reduce type-checking complexity
+
+    private struct CountControlsRow: View {
+        @Binding var count: Int
+
+        init(count: Binding<Int>) {
+            self._count = count
+        }
+
+        var body: some View {
+            HStack(spacing: 12) {
+                Button {
+                    if count > 0 {
+                        count -= 1
+                    }
+                } label: {
+                    Image(systemName: "minus")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 36)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+                }
+
+                EditableCountField(count: $count)
+                    .frame(width: 60)
+
+                Button {
+                    count += 1
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 36)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+                }
+            }
+            .padding(.top, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private struct PricePerRow: View {
+        @Binding var isUnitMenuOpen: Bool
+        @Binding var price: Double
+
+        init(isUnitMenuOpen: Binding<Bool>, price: Binding<Double>) {
+            self._isUnitMenuOpen = isUnitMenuOpen
+            self._price = price
+        }
+
+        var body: some View {
+            HStack(alignment: .center, spacing: 8) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isUnitMenuOpen.toggle()
+                    }
+                } label: {
+                    VStack(spacing: 2) {
+                        Text("Price Per…")
+                            .font(.subheadline.weight(.semibold))
+                            .multilineTextAlignment(.center)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                        let chevronRotation = Angle(degrees: isUnitMenuOpen ? 180 : 0)
+                        Image(systemName: "chevron.down")
+                            .font(.subheadline.weight(.semibold))
+                            .rotationEffect(chevronRotation)
+                            .animation(.easeInOut(duration: 0.2), value: isUnitMenuOpen)
+                    }
+                    .frame(minWidth: 0, idealWidth: 140, maxWidth: 160)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 6)
+
+                PriceField(value: $price)
+                    .frame(minWidth: 76, idealWidth: 88, maxWidth: 110, alignment: .trailing)
+            }
+        }
+    }
+
+    private struct UnitDropdownMenu: View {
+        @Binding var unit: PricingUnit
+
+        init(unit: Binding<PricingUnit>) {
+            self._unit = unit
+        }
+
+        var body: some View {
+            VStack(spacing: 8) {
+                Picker("", selection: $unit) {
+                    Text("Window").tag(PricingUnit.window)
+                    Text("Pane").tag(PricingUnit.pane)
+                }
+                .pickerStyle(.segmented)
+            }
+        }
+    }
+
+    private struct AdvancedOptionsBlock: View {
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Advanced options coming soon…")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Label("Example toggle", systemImage: "slider.horizontal.3")
+                    Spacer()
+                    Toggle("", isOn: .constant(true))
+                        .labelsHidden()
+                }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(.tertiarySystemBackground))
+                )
+            }
+        }
     }
 
     // Small helper view to edit an Int count with numeric keyboard and validation
@@ -929,4 +921,3 @@ private enum PricingUnit: String, CaseIterable, Identifiable {
     case window, pane
     var id: String { rawValue }
 }
-
