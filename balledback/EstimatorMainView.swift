@@ -113,11 +113,22 @@ struct EstimatorMainView: View {
     @State private var threePlusCount: Int = 0
     @State private var basementCount: Int = 0
 
-    // Per-tile price (per window)
+    // Per-tile price (per unit)
     @State private var groundPrice: Double = 0
     @State private var secondPrice: Double = 0
     @State private var threePlusPrice: Double = 0
     @State private var basementPrice: Double = 0
+
+    // Per-tile pricing unit and unit menu state
+    @State private var groundUnit: PricingUnit = .window
+    @State private var secondUnit: PricingUnit = .window
+    @State private var threePlusUnit: PricingUnit = .window
+    @State private var basementUnit: PricingUnit = .window
+
+    @State private var groundUnitMenuOpen: Bool = false
+    @State private var secondUnitMenuOpen: Bool = false
+    @State private var threePlusUnitMenuOpen: Bool = false
+    @State private var basementUnitMenuOpen: Bool = false
 
     // Initial snapshots for dirty detection
     @State private var initialJobName: String = ""
@@ -180,160 +191,197 @@ struct EstimatorMainView: View {
             || basementCount != initialBasementCount
     }
 
+    // Derived: any unit menu open?
+    private var anyUnitMenuOpen: Bool {
+        groundUnitMenuOpen || secondUnitMenuOpen || threePlusUnitMenuOpen || basementUnitMenuOpen
+    }
+
     init(source: EstimatorSource, existingEstimate: Estimate? = nil) {
         self.source = source
         self.existingEstimate = existingEstimate
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+        ZStack {
+            // Global tap-to-dismiss visual overlay (non-blocking)
+            if anyUnitMenuOpen {
+                Rectangle()
+                    .fill(Color.clear)
+                    .contentShape(Rectangle())
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                    .allowsHitTesting(false) // do not block taps; we handle closing via the content gesture below
+            }
 
-                // Job Name input
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Job Name")
-                        .font(.headline)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
 
-                    TextField("Enter job name", text: $jobName)
+                    // Job Name input
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Job Name")
+                            .font(.headline)
+
+                        TextField("Enter job name", text: $jobName)
+                            .textInputAutocapitalization(.words)
+                            .submitLabel(.done)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($jobNameFocused)
+                    }
+
+                    // Phone Number input (digits only)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Phone Number")
+                            .font(.headline)
+
+                        TextField("Enter phone number", text: $phoneNumber)
+                            .keyboardType(.numberPad)
+                            .textInputAutocapitalization(.never)
+                            .submitLabel(.done)
+                            .textFieldStyle(.roundedBorder)
+                            .onChange(of: phoneNumber) { _, newValue in
+                                let filtered = newValue.filter { $0.isNumber }
+                                if filtered != newValue {
+                                    phoneNumber = filtered
+                                }
+                            }
+                    }
+
+                    // Job Location input with suggestions
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Job Location")
+                            .font(.headline)
+
+                        TextField("Enter job location", text: $jobLocation, onEditingChanged: { isEditing in
+                            showSuggestions = isEditing && !jobLocation.isEmpty
+                        })
                         .textInputAutocapitalization(.words)
                         .submitLabel(.done)
                         .textFieldStyle(.roundedBorder)
-                        .focused($jobNameFocused)
-                }
-
-                // Phone Number input (digits only)
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Phone Number")
-                        .font(.headline)
-
-                    TextField("Enter phone number", text: $phoneNumber)
-                        .keyboardType(.numberPad)
-                        .textInputAutocapitalization(.never)
-                        .submitLabel(.done)
-                        .textFieldStyle(.roundedBorder)
-                        .onChange(of: phoneNumber) { _, newValue in
-                            let filtered = newValue.filter { $0.isNumber }
-                            if filtered != newValue {
-                                phoneNumber = filtered
-                            }
+                        .onChange(of: jobLocation) { _, newValue in
+                            searchModel.query = newValue
+                            showSuggestions = !newValue.isEmpty
                         }
-                }
 
-                // Job Location input with suggestions
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Job Location")
-                        .font(.headline)
-
-                    TextField("Enter job location", text: $jobLocation, onEditingChanged: { isEditing in
-                        showSuggestions = isEditing && !jobLocation.isEmpty
-                    })
-                    .textInputAutocapitalization(.words)
-                    .submitLabel(.done)
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: jobLocation) { _, newValue in
-                        searchModel.query = newValue
-                        showSuggestions = !newValue.isEmpty
-                    }
-
-                    if showSuggestions && !searchModel.results.isEmpty {
-                        VStack(spacing: 0) {
-                            ForEach(searchModel.results, id: \.self) { item in
-                                Button {
-                                    let combined = item.title.isEmpty ? item.subtitle : "\(item.title) \(item.subtitle)"
-                                    jobLocation = combined.trimmingCharacters(in: .whitespacesAndNewlines)
-                                    showSuggestions = false
-                                } label: {
-                                    HStack(alignment: .top, spacing: 8) {
-                                        Image(systemName: "mappin.and.ellipse")
-                                            .foregroundStyle(.secondary)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(item.title)
-                                                .foregroundStyle(.primary)
-                                            if !item.subtitle.isEmpty {
-                                                Text(item.subtitle)
-                                                    .foregroundStyle(.secondary)
-                                                    .font(.subheadline)
+                        if showSuggestions && !searchModel.results.isEmpty {
+                            VStack(spacing: 0) {
+                                ForEach(searchModel.results, id: \.self) { item in
+                                    Button {
+                                        let combined = item.title.isEmpty ? item.subtitle : "\(item.title) \(item.subtitle)"
+                                        jobLocation = combined.trimmingCharacters(in: .whitespacesAndNewlines)
+                                        showSuggestions = false
+                                    } label: {
+                                        HStack(alignment: .top, spacing: 8) {
+                                            Image(systemName: "mappin.and.ellipse")
+                                                .foregroundStyle(.secondary)
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(item.title)
+                                                    .foregroundStyle(.primary)
+                                                if !item.subtitle.isEmpty {
+                                                    Text(item.subtitle)
+                                                        .foregroundStyle(.secondary)
+                                                        .font(.subheadline)
+                                                }
                                             }
+                                            Spacer()
                                         }
-                                        Spacer()
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 10)
                                     }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 10)
-                                }
-                                .buttonStyle(.plain)
+                                    .buttonStyle(.plain)
 
-                                if item != searchModel.results.last {
-                                    Divider()
+                                    if item != searchModel.results.last {
+                                        Divider()
+                                    }
                                 }
                             }
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(Color(.systemBackground))
+                                    .shadow(color: .black.opacity(0.1), radius: 6, x: 0, y: 3)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Color(.separator), lineWidth: 0.5)
+                            )
                         }
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(Color(.systemBackground))
-                                .shadow(color: .black.opacity(0.1), radius: 6, x: 0, y: 3)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(Color(.separator), lineWidth: 0.5)
-                        )
+                    }
+
+                    // Window Categories (fixed 2x2 grid of tiles)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Exterior")
+                            .font(.headline)
+
+                        // Exactly two columns; add a small central gutter.
+                        let columns = [
+                            GridItem(.flexible(), spacing: 35, alignment: .top),
+                            GridItem(.flexible(), spacing: 12, alignment: .top)
+                        ]
+
+                        // spacing: vertical spacing between rows
+                        LazyVGrid(columns: columns, alignment: .center, spacing: 5) {
+                            categoryTile(
+                                title: "Ground Level",
+                                count: $groundCount,
+                                color: .blue,
+                                isExpanded: $isGroundExpanded,
+                                price: $groundPrice,
+                                unit: $groundUnit,
+                                isUnitMenuOpen: $groundUnitMenuOpen
+                            )
+                            .scaleEffect(0.95)
+
+                            categoryTile(
+                                title: "Second Story",
+                                count: $secondCount,
+                                color: .teal,
+                                isExpanded: $isSecondExpanded,
+                                price: $secondPrice,
+                                unit: $secondUnit,
+                                isUnitMenuOpen: $secondUnitMenuOpen
+                            )
+                            .scaleEffect(0.95)
+
+                            categoryTile(
+                                title: "3+ Story",
+                                count: $threePlusCount,
+                                color: .purple,
+                                isExpanded: $isThreePlusExpanded,
+                                price: $threePlusPrice,
+                                unit: $threePlusUnit,
+                                isUnitMenuOpen: $threePlusUnitMenuOpen
+                            )
+                            .scaleEffect(0.95)
+
+                            categoryTile(
+                                title: "Basement",
+                                count: $basementCount,
+                                color: .indigo,
+                                isExpanded: $isBasementExpanded,
+                                price: $basementPrice,
+                                unit: $basementUnit,
+                                isUnitMenuOpen: $basementUnitMenuOpen
+                            )
+                            .scaleEffect(0.95)
+                        }
+                        .padding(.top, 2)
+                        .padding(.horizontal, 7) // Outer gutters so tiles don't hug screen edges
                     }
                 }
-
-                // Window Categories (fixed 2x2 grid of tiles)
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Exterior")
-                        .font(.headline)
-
-                    // Exactly two columns; add a small central gutter.
-                    let columns = [
-                        GridItem(.flexible(), spacing: 35, alignment: .top),
-                        GridItem(.flexible(), spacing: 12, alignment: .top)
-                    ]
-
-                    // spacing: vertical spacing between rows
-                    LazyVGrid(columns: columns, alignment: .center, spacing: 5) {
-                        categoryTile(
-                            title: "Ground Level",
-                            count: $groundCount,
-                            color: .blue,
-                            isExpanded: $isGroundExpanded,
-                            price: $groundPrice
-                        )
-                        .scaleEffect(0.95)
-
-                        categoryTile(
-                            title: "Second Story",
-                            count: $secondCount,
-                            color: .teal,
-                            isExpanded: $isSecondExpanded,
-                            price: $secondPrice
-                        )
-                        .scaleEffect(0.95)
-
-                        categoryTile(
-                            title: "3+ Story",
-                            count: $threePlusCount,
-                            color: .purple,
-                            isExpanded: $isThreePlusExpanded,
-                            price: $threePlusPrice
-                        )
-                        .scaleEffect(0.95)
-
-                        categoryTile(
-                            title: "Basement",
-                            count: $basementCount,
-                            color: .indigo,
-                            isExpanded: $isBasementExpanded,
-                            price: $basementPrice
-                        )
-                        .scaleEffect(0.95)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                // Global tap-to-dismiss: close menus when tapping outside dropdowns
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if anyUnitMenuOpen {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            groundUnitMenuOpen = false
+                            secondUnitMenuOpen = false
+                            threePlusUnitMenuOpen = false
+                            basementUnitMenuOpen = false
+                        }
                     }
-                    .padding(.top, 2)
-                    .padding(.horizontal, 7) // Outer gutters so tiles don't hug screen edges
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
         }
         .navigationTitle(existingEstimate == nil ? "" : "Edit Estimate")
         .navigationBarTitleDisplayMode(.inline)
@@ -484,12 +532,11 @@ struct EstimatorMainView: View {
         count: Binding<Int>,
         color: Color,
         isExpanded: Binding<Bool>,
-        price: Binding<Double>
+        price: Binding<Double>,
+        unit: Binding<PricingUnit>,
+        isUnitMenuOpen: Binding<Bool>
     ) -> some View {
         let collapsedHeight: CGFloat = 250
-        // Local selection for pricing unit (visual indicator)
-        @State var unit: PricingUnit = .window
-        @State var isUnitMenuOpen: Bool = false
 
         VStack(spacing: 8) {
             Text(title)
@@ -530,7 +577,7 @@ struct EstimatorMainView: View {
                 HStack(alignment: .center, spacing: 8) {
                     Button {
                         withAnimation(.easeInOut(duration: 0.2)) {
-                            isUnitMenuOpen.toggle()
+                            isUnitMenuOpen.wrappedValue.toggle()
                         }
                     } label: {
                         VStack(spacing: 2) {
@@ -541,11 +588,10 @@ struct EstimatorMainView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                             Image(systemName: "chevron.down")
                                 .font(.subheadline.weight(.semibold))
-                                .rotationEffect(.degrees(isUnitMenuOpen ? 180 : 0))
-                                .animation(.easeInOut(duration: 0.2), value: isUnitMenuOpen)
+                                .rotationEffect(.degrees(isUnitMenuOpen.wrappedValue ? 180 : 0))
+                                .animation(.easeInOut(duration: 0.2), value: isUnitMenuOpen.wrappedValue)
                         }
-                        // Make it only slightly wider than the text
-                        .frame(minWidth: 0, idealWidth: 108, maxWidth: 130)
+                        .frame(minWidth: 0, idealWidth: 140, maxWidth: 160)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(
@@ -561,44 +607,53 @@ struct EstimatorMainView: View {
                         .frame(minWidth: 76, idealWidth: 88, maxWidth: 110, alignment: .trailing)
                 }
 
-                if isUnitMenuOpen {
-                    VStack(alignment: .leading, spacing: 0) {
+                if isUnitMenuOpen.wrappedValue {
+                    VStack(alignment: .leading, spacing: 8) {
+                        // Window row
                         Button {
-                            unit = .window
-                            withAnimation(.easeInOut(duration: 0.2)) { isUnitMenuOpen = false }
+                            unit.wrappedValue = .window
+                            // Keep menu open after selection
                         } label: {
                             HStack {
                                 Text("Window")
-                                if unit == .window {
-                                    Spacer()
-                                    Image(systemName: "checkmark")
-                                        .foregroundStyle(.blue)
-                                }
+                                    .font(.body)
+                                    .foregroundStyle(unit.wrappedValue == .window ? .white : .primary)
+                                Spacer()
                             }
                             .padding(.horizontal, 10)
                             .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(unit.wrappedValue == .window ? Color.blue : Color.clear)
+                            )
                         }
                         .buttonStyle(.plain)
+                        // Consume taps so they don't bubble to the global onTapGesture
+                        .highPriorityGesture(TapGesture())
 
-                        Divider()
-
+                        // Pane row
                         Button {
-                            unit = .pane
-                            withAnimation(.easeInOut(duration: 0.2)) { isUnitMenuOpen = false }
+                            unit.wrappedValue = .pane
+                            // Keep menu open after selection
                         } label: {
                             HStack {
                                 Text("Pane")
-                                if unit == .pane {
-                                    Spacer()
-                                    Image(systemName: "checkmark")
-                                        .foregroundStyle(.blue)
-                                }
+                                    .font(.body)
+                                    .foregroundStyle(unit.wrappedValue == .pane ? .white : .primary)
+                                Spacer()
                             }
                             .padding(.horizontal, 10)
                             .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(unit.wrappedValue == .pane ? Color.blue : Color.clear)
+                            )
                         }
                         .buttonStyle(.plain)
+                        // Consume taps so they don't bubble to the global onTapGesture
+                        .highPriorityGesture(TapGesture())
                     }
+                    .padding(6)
                     .background(
                         RoundedRectangle(cornerRadius: 10)
                             .fill(Color(.systemBackground))
@@ -609,6 +664,8 @@ struct EstimatorMainView: View {
                             .stroke(Color(.separator), lineWidth: 0.5)
                     )
                     .transition(.opacity.combined(with: .move(edge: .top)))
+                    // Also consume taps anywhere in the dropdown container
+                    .highPriorityGesture(TapGesture())
                 }
             }
             .padding(.vertical, 4)
@@ -676,7 +733,8 @@ struct EstimatorMainView: View {
         .frame(
             maxWidth: .infinity,
             minHeight: collapsedHeight,
-            maxHeight: isExpanded.wrappedValue ? .infinity : collapsedHeight,
+            // Expand if either Advanced is open or the Price Per menu is open.
+            maxHeight: (isExpanded.wrappedValue || isUnitMenuOpen.wrappedValue) ? .infinity : collapsedHeight,
             alignment: .topLeading
         )
         .background(
@@ -689,6 +747,7 @@ struct EstimatorMainView: View {
                 .stroke(color.opacity(0.25), lineWidth: 1)
         )
         .contentShape(Rectangle())
+        .animation(.easeInOut(duration: 0.2), value: isUnitMenuOpen.wrappedValue)
     }
 
     // Small helper view to edit an Int count with numeric keyboard and validation
@@ -731,15 +790,6 @@ struct EstimatorMainView: View {
                 let current = Int(text) ?? 0
                 if current != newValue {
                     text = String(newValue)
-                }
-            }
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") {
-                        isFocused = false
-                    }
-                    .font(.headline)
                 }
             }
             .accessibilityLabel("Quantity")
@@ -793,15 +843,6 @@ struct EstimatorMainView: View {
                 // Reformat on focus loss to ensure "$x.xx"
                 if !focused {
                     text = currencyString(from: value)
-                }
-            }
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") {
-                        isFocused = false
-                    }
-                    .font(.headline)
                 }
             }
             .accessibilityLabel("Price per unit")
