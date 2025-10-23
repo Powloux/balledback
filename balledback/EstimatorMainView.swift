@@ -487,6 +487,8 @@ struct EstimatorMainView: View {
         price: Binding<Double>
     ) -> some View {
         let collapsedHeight: CGFloat = 200
+        // Local selection for pricing unit (visual indicator)
+        @State var unit: PricingUnit = .window
 
         VStack(spacing: 8) {
             Text(title)
@@ -522,14 +524,20 @@ struct EstimatorMainView: View {
             .padding(.top, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Price per window
+            // Price row: segmented toggle (Window/Pane) + price field
             HStack(spacing: 8) {
-                Text("Price per window")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Spacer()
+                Picker("", selection: $unit) {
+                    Text("Window").tag(PricingUnit.window)
+                    Text("Pane").tag(PricingUnit.pane)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 180) // compact width to keep things tidy
+
+                Spacer(minLength: 6)
+
                 PriceField(value: price)
-                    .frame(width: 110)
+                    .frame(minWidth: 76, idealWidth: 88, maxWidth: 110, alignment: .trailing)
             }
             .padding(.vertical, 4)
 
@@ -557,23 +565,32 @@ struct EstimatorMainView: View {
                 .animation(.easeInOut, value: isExpanded.wrappedValue)
             }
 
-            // Bottom-aligned Advanced Modifiers button with slight padding
+            // Bottom-aligned Advanced Modifiers button with increased vertical size and stacked text
             Button {
                 withAnimation(.easeInOut) {
                     isExpanded.wrappedValue.toggle()
                 }
             } label: {
-                HStack(spacing: 6) {
-                    Text("Advanced Modifiers")
-                        .font(.subheadline.weight(.semibold))
+                HStack(alignment: .center, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Advanced")
+                        Text("Modifiers")
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                    Spacer()
+
                     Image(systemName: "chevron.down")
                         .font(.subheadline.weight(.semibold))
                         .rotationEffect(.degrees(isExpanded.wrappedValue ? 180 : 0))
                         .animation(.easeInOut(duration: 0.2), value: isExpanded.wrappedValue)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 6)
-                .padding(.horizontal, 8)
+                .padding(.vertical, 10) // increased vertical padding
+                .padding(.horizontal, 10)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
                         .fill(Color(.secondarySystemBackground))
@@ -685,7 +702,7 @@ struct EstimatorMainView: View {
             .focused($isFocused)
             .multilineTextAlignment(.trailing)
             .font(.system(size: 18, weight: .semibold, design: .rounded))
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 8)
@@ -715,7 +732,7 @@ struct EstimatorMainView: View {
                     .font(.headline)
                 }
             }
-            .accessibilityLabel("Price per window")
+            .accessibilityLabel("Price per unit")
         }
 
         private func currencyString(from v: Double) -> String {
@@ -791,4 +808,11 @@ struct EstimatorMainView: View {
         EstimatorMainView(source: .standard)
             .environmentObject(EstimatorStore())
     }
+}
+
+// MARK: - Supporting types
+
+private enum PricingUnit: String, CaseIterable, Identifiable {
+    case window, pane
+    var id: String { rawValue }
 }
