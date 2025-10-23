@@ -486,9 +486,10 @@ struct EstimatorMainView: View {
         isExpanded: Binding<Bool>,
         price: Binding<Double>
     ) -> some View {
-        let collapsedHeight: CGFloat = 200
+        let collapsedHeight: CGFloat = 250
         // Local selection for pricing unit (visual indicator)
         @State var unit: PricingUnit = .window
+        @State var isUnitMenuOpen: Bool = false
 
         VStack(spacing: 8) {
             Text(title)
@@ -524,20 +525,91 @@ struct EstimatorMainView: View {
             .padding(.top, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Price row: segmented toggle (Window/Pane) + price field
-            HStack(spacing: 8) {
-                Picker("", selection: $unit) {
-                    Text("Window").tag(PricingUnit.window)
-                    Text("Pane").tag(PricingUnit.pane)
+            // Price row: "Price Per…" button with dropdown + price field
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .center, spacing: 8) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isUnitMenuOpen.toggle()
+                        }
+                    } label: {
+                        VStack(spacing: 2) {
+                            Text("Price Per…")
+                                .font(.subheadline.weight(.semibold))
+                                .multilineTextAlignment(.center)
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Image(systemName: "chevron.down")
+                                .font(.subheadline.weight(.semibold))
+                                .rotationEffect(.degrees(isUnitMenuOpen ? 180 : 0))
+                                .animation(.easeInOut(duration: 0.2), value: isUnitMenuOpen)
+                        }
+                        // Make it only slightly wider than the text
+                        .frame(minWidth: 0, idealWidth: 108, maxWidth: 130)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer(minLength: 6)
+
+                    PriceField(value: price)
+                        .frame(minWidth: 76, idealWidth: 88, maxWidth: 110, alignment: .trailing)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 180) // compact width to keep things tidy
 
-                Spacer(minLength: 6)
+                if isUnitMenuOpen {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Button {
+                            unit = .window
+                            withAnimation(.easeInOut(duration: 0.2)) { isUnitMenuOpen = false }
+                        } label: {
+                            HStack {
+                                Text("Window")
+                                if unit == .window {
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.blue)
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                        }
+                        .buttonStyle(.plain)
 
-                PriceField(value: price)
-                    .frame(minWidth: 76, idealWidth: 88, maxWidth: 110, alignment: .trailing)
+                        Divider()
+
+                        Button {
+                            unit = .pane
+                            withAnimation(.easeInOut(duration: 0.2)) { isUnitMenuOpen = false }
+                        } label: {
+                            HStack {
+                                Text("Pane")
+                                if unit == .pane {
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.blue)
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color(.systemBackground))
+                            .shadow(color: .black.opacity(0.1), radius: 6, x: 0, y: 3)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color(.separator), lineWidth: 0.5)
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
             .padding(.vertical, 4)
 
@@ -589,7 +661,7 @@ struct EstimatorMainView: View {
                         .animation(.easeInOut(duration: 0.2), value: isExpanded.wrappedValue)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 10) // increased vertical padding
+                .padding(.vertical, 10)
                 .padding(.horizontal, 10)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
