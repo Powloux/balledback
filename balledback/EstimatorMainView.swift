@@ -537,7 +537,7 @@ struct EstimatorMainView: View {
         unit: Binding<PricingUnit>,
         isUnitMenuOpen: Binding<Bool>
     ) -> some View {
-        let collapsedHeight: CGFloat = 250
+        let collapsedHeight: CGFloat = 300
         let dropdownTransition: AnyTransition = .opacity.combined(with: .move(edge: .top))
 
         VStack(spacing: 8) {
@@ -580,7 +580,12 @@ struct EstimatorMainView: View {
                     .animation(.easeInOut, value: isExpanded.wrappedValue)
             }
 
-            // Bottom-aligned Advanced Modifiers button with increased vertical size and stacked text
+            // Spacer to keep the Advanced button near the bottom whenever collapsed
+            if !isExpanded.wrappedValue {
+                Spacer(minLength: 8)
+            }
+
+            // Bottom-aligned Advanced Modifiers button with small bottom padding
             Button {
                 withAnimation(.easeInOut) {
                     isExpanded.wrappedValue.toggle()
@@ -615,6 +620,7 @@ struct EstimatorMainView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Advanced Modifiers")
             .padding(.top, 4)
+            .padding(.bottom, 8) // small bottom padding so it's not flush
         }
         .padding(10)
         .frame(
