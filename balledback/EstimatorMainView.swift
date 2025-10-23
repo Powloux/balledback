@@ -132,11 +132,21 @@ struct EstimatorMainView: View {
     // Confirm discard/save draft
     @State private var showDiscardDialog = false
 
-    // Enable Save if either job name OR job location has content
+    // New: alert for saving without a name
+    @State private var showUnnamedSaveAlert = false
+
+    // Focus for job name field to bring it into focus when user chooses "Name"
+    @FocusState private var jobNameFocused: Bool
+
+    // Enable Save if either job name OR job location OR phone OR any window count has content
+    private var hasAnyCounts: Bool {
+        groundCount > 0 || secondCount > 0 || threePlusCount > 0 || basementCount > 0
+    }
     private var canSave: Bool {
         let trimmedJobName = jobName.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedLocation = jobLocation.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmedJobName.isEmpty || !trimmedLocation.isEmpty
+        let trimmedPhone = phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmedJobName.isEmpty || !trimmedLocation.isEmpty || !trimmedPhone.isEmpty || hasAnyCounts
     }
 
     // Dirty check: any changes compared to initial values (including counts)
@@ -160,7 +170,7 @@ struct EstimatorMainView: View {
 
     init(source: EstimatorSource, existingEstimate: Estimate? = nil) {
         self.source = source
-               self.existingEstimate = existingEstimate
+        self.existingEstimate = existingEstimate
     }
 
     var body: some View {
@@ -176,6 +186,7 @@ struct EstimatorMainView: View {
                         .textInputAutocapitalization(.words)
                         .submitLabel(.done)
                         .textFieldStyle(.roundedBorder)
+                        .focused($jobNameFocused)
                 }
 
                 // Phone Number input (digits only)
@@ -256,40 +267,49 @@ struct EstimatorMainView: View {
                     }
                 }
 
-                // Window Categories (2x2 grid of tiles)
+                // Window Categories (fixed 2x2 grid of tiles)
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Window Categories")
+                    Text("Exterior")
                         .font(.headline)
 
-                    // Use adaptive columns with a minimum width to guarantee side gutters.
-                    // Inter-item spacing (horizontal) and row spacing (vertical) provide visible gaps between tiles.
+                    // Exactly two columns; add a small central gutter.
                     let columns = [
-                        GridItem(.adaptive(minimum: 180), spacing: 20, alignment: .top)
+                        GridItem(.flexible(), spacing: 35, alignment: .top),
+                        GridItem(.flexible(), spacing: 12, alignment: .top)
                     ]
 
-                    LazyVGrid(columns: columns, alignment: .center, spacing: 20) {
+                    // spacing: vertical spacing between rows
+                    LazyVGrid(columns: columns, alignment: .center, spacing: 5) {
                         categoryTile(
                             title: "Ground Level",
                             count: $groundCount,
                             color: .blue
                         )
+                        .scaleEffect(0.95)
+
                         categoryTile(
                             title: "Second Story",
                             count: $secondCount,
                             color: .teal
                         )
+                        .scaleEffect(0.95)
+
                         categoryTile(
                             title: "3+ Story",
                             count: $threePlusCount,
                             color: .purple
                         )
+                        .scaleEffect(0.95)
+
                         categoryTile(
                             title: "Basement",
                             count: $basementCount,
                             color: .indigo
                         )
+                        .scaleEffect(0.95)
                     }
-                    .padding(.top, 2) // tiny breathing room from the section header
+                    .padding(.top, 2)
+                    .padding(.horizontal, 7) // Outer gutters so tiles don't hug screen edges
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -349,7 +369,13 @@ struct EstimatorMainView: View {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 // Save button
                 Button {
-                    finalizeAndDismiss(save: true)
+                    let nameIsEmpty = jobName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    if nameIsEmpty && hasAnyCounts {
+                        // Ask to confirm saving without a name
+                        showUnnamedSaveAlert = true
+                    } else {
+                        finalizeAndDismiss(save: true)
+                    }
                 } label: {
                     Text("Save")
                         .font(.subheadline.weight(.semibold))
@@ -415,6 +441,19 @@ struct EstimatorMainView: View {
         } message: {
             Text("Would you like to save your changes as a draft or discard them?")
         }
+
+        // Alert for saving without a name
+        .alert("Save job without naming?", isPresented: $showUnnamedSaveAlert) {
+            Button("Yes") {
+                finalizeAndDismiss(save: true)
+            }
+            Button("Name") {
+                // Focus the job name field for quick entry
+                jobNameFocused = true
+            }
+        } message: {
+            Text("You can always name it later.")
+        }
     }
 
     // MARK: - Tile Builder
@@ -424,7 +463,8 @@ struct EstimatorMainView: View {
         VStack(spacing: 10) {
             Text(title)
                 .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center) // Center the title
+                .multilineTextAlignment(.center)
 
             Spacer(minLength: 6)
 
@@ -457,7 +497,7 @@ struct EstimatorMainView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(12)
-        .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 200, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 14)
                 .fill(Color(.systemBackground))
@@ -536,8 +576,12 @@ struct EstimatorMainView: View {
             return
         }
 
+        // Default name if empty
+        let trimmedName = jobName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalName = trimmedName.isEmpty ? "Untitled Estimate" : trimmedName
+
         let trimmed = Estimate(
-            jobName: jobName.trimmingCharacters(in: .whitespacesAndNewlines),
+            jobName: finalName,
             phoneNumber: phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines),
             jobLocation: jobLocation.trimmingCharacters(in: .whitespacesAndNewlines),
             groundCount: groundCount,
