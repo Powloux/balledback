@@ -45,14 +45,18 @@ final class EstimatorStore: ObservableObject {
         switch source {
         case .standard:
             if let idx = standardEstimates.firstIndex(where: { $0.id == id }) {
-                // Preserve id and createdAt of existing item; update fields
+                // Preserve id and createdAt of existing item; update all mutable fields
                 let preserved = standardEstimates[idx]
                 standardEstimates[idx] = Estimate(
                     id: preserved.id,
                     createdAt: preserved.createdAt,
                     jobName: updated.jobName,
                     phoneNumber: updated.phoneNumber,
-                    jobLocation: updated.jobLocation
+                    jobLocation: updated.jobLocation,
+                    groundCount: updated.groundCount,
+                    secondCount: updated.secondCount,
+                    threePlusCount: updated.threePlusCount,
+                    basementCount: updated.basementCount
                 )
             }
         case .premium:
@@ -63,7 +67,11 @@ final class EstimatorStore: ObservableObject {
                     createdAt: preserved.createdAt,
                     jobName: updated.jobName,
                     phoneNumber: updated.phoneNumber,
-                    jobLocation: updated.jobLocation
+                    jobLocation: updated.jobLocation,
+                    groundCount: updated.groundCount,
+                    secondCount: updated.secondCount,
+                    threePlusCount: updated.threePlusCount,
+                    basementCount: updated.basementCount
                 )
             }
         }
