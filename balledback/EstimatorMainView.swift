@@ -460,13 +460,11 @@ struct EstimatorMainView: View {
 
     @ViewBuilder
     private func categoryTile(title: String, count: Binding<Int>, color: Color) -> some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 6) {
             Text(title)
                 .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .center) // Center the title
+                .frame(maxWidth: .infinity, alignment: .center)
                 .multilineTextAlignment(.center)
-
-            Spacer(minLength: 6)
 
             // Controls row: − [count] +
             HStack(spacing: 12) {
@@ -494,9 +492,31 @@ struct EstimatorMainView: View {
                         .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
                 }
             }
+            .padding(.top, 20)
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Advanced Modifiers button (placeholder for future dropdown)
+            Button {
+                // TODO: Expand/collapse advanced section
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Advanced Modifiers")
+                        .font(.subheadline.weight(.semibold))
+                    Image(systemName: "chevron.down")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(.secondarySystemBackground))
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Advanced Modifiers")
         }
-        .padding(12)
+        .padding(10)
         .frame(maxWidth: .infinity, minHeight: 200, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 14)
