@@ -929,3 +929,4 @@ private enum PricingUnit: String, CaseIterable, Identifiable {
     case window, pane
     var id: String { rawValue }
 }
+
