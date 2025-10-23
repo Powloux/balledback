@@ -45,7 +45,6 @@ final class EstimatorStore: ObservableObject {
         switch source {
         case .standard:
             if let idx = standardEstimates.firstIndex(where: { $0.id == id }) {
-                // Preserve id and createdAt of existing item; update all mutable fields
                 let preserved = standardEstimates[idx]
                 standardEstimates[idx] = Estimate(
                     id: preserved.id,
@@ -56,7 +55,15 @@ final class EstimatorStore: ObservableObject {
                     groundCount: updated.groundCount,
                     secondCount: updated.secondCount,
                     threePlusCount: updated.threePlusCount,
-                    basementCount: updated.basementCount
+                    basementCount: updated.basementCount,
+                    groundPrice: updated.groundPrice,
+                    secondPrice: updated.secondPrice,
+                    threePlusPrice: updated.threePlusPrice,
+                    basementPrice: updated.basementPrice,
+                    groundUnit: updated.groundUnit,
+                    secondUnit: updated.secondUnit,
+                    threePlusUnit: updated.threePlusUnit,
+                    basementUnit: updated.basementUnit
                 )
             }
         case .premium:
@@ -71,7 +78,15 @@ final class EstimatorStore: ObservableObject {
                     groundCount: updated.groundCount,
                     secondCount: updated.secondCount,
                     threePlusCount: updated.threePlusCount,
-                    basementCount: updated.basementCount
+                    basementCount: updated.basementCount,
+                    groundPrice: updated.groundPrice,
+                    secondPrice: updated.secondPrice,
+                    threePlusPrice: updated.threePlusPrice,
+                    basementPrice: updated.basementPrice,
+                    groundUnit: updated.groundUnit,
+                    secondUnit: updated.secondUnit,
+                    threePlusUnit: updated.threePlusUnit,
+                    basementUnit: updated.basementUnit
                 )
             }
         }
@@ -99,4 +114,3 @@ final class EstimatorStore: ObservableObject {
         }
     }
 }
-

@@ -379,6 +379,16 @@ struct EstimatorMainView: View {
                 secondCount = estimate.secondCount
                 threePlusCount = estimate.threePlusCount
                 basementCount = estimate.basementCount
+
+                groundPrice = estimate.groundPrice
+                secondPrice = estimate.secondPrice
+                threePlusPrice = estimate.threePlusPrice
+                basementPrice = estimate.basementPrice
+
+                groundUnit = estimate.groundUnit
+                secondUnit = estimate.secondUnit
+                threePlusUnit = estimate.threePlusUnit
+                basementUnit = estimate.basementUnit
             }
 
             // Capture initial values for dirty checking
@@ -447,6 +457,16 @@ struct EstimatorMainView: View {
                     secondCount = 0
                     threePlusCount = 0
                     basementCount = 0
+
+                    groundPrice = 0
+                    secondPrice = 0
+                    threePlusPrice = 0
+                    basementPrice = 0
+
+                    groundUnit = .window
+                    secondUnit = .window
+                    threePlusUnit = .window
+                    basementUnit = .window
 
                     searchModel.query = ""
                     showSuggestions = false
@@ -896,7 +916,15 @@ struct EstimatorMainView: View {
             groundCount: groundCount,
             secondCount: secondCount,
             threePlusCount: threePlusCount,
-            basementCount: basementCount
+            basementCount: basementCount,
+            groundPrice: groundPrice,
+            secondPrice: secondPrice,
+            threePlusPrice: threePlusPrice,
+            basementPrice: basementPrice,
+            groundUnit: groundUnit,
+            secondUnit: secondUnit,
+            threePlusUnit: threePlusUnit,
+            basementUnit: basementUnit
         )
 
         if let existing = existingEstimate {
@@ -913,11 +941,4 @@ struct EstimatorMainView: View {
         EstimatorMainView(source: .standard)
             .environmentObject(EstimatorStore())
     }
-}
-
-// MARK: - Supporting types
-
-private enum PricingUnit: String, CaseIterable, Identifiable {
-    case window, pane
-    var id: String { rawValue }
 }

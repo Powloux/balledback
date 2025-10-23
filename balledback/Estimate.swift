@@ -21,6 +21,18 @@ struct Estimate: Identifiable, Hashable {
     var threePlusCount: Int
     var basementCount: Int
 
+    // Per-category prices
+    var groundPrice: Double
+    var secondPrice: Double
+    var threePlusPrice: Double
+    var basementPrice: Double
+
+    // Per-category units
+    var groundUnit: PricingUnit
+    var secondUnit: PricingUnit
+    var threePlusUnit: PricingUnit
+    var basementUnit: PricingUnit
+
     init(
         id: UUID = UUID(),
         createdAt: Date = Date(),
@@ -30,16 +42,35 @@ struct Estimate: Identifiable, Hashable {
         groundCount: Int = 0,
         secondCount: Int = 0,
         threePlusCount: Int = 0,
-        basementCount: Int = 0
+        basementCount: Int = 0,
+        groundPrice: Double = 0,
+        secondPrice: Double = 0,
+        threePlusPrice: Double = 0,
+        basementPrice: Double = 0,
+        groundUnit: PricingUnit = .window,
+        secondUnit: PricingUnit = .window,
+        threePlusUnit: PricingUnit = .window,
+        basementUnit: PricingUnit = .window
     ) {
         self.id = id
         self.createdAt = createdAt
         self.jobName = jobName
         self.phoneNumber = phoneNumber
         self.jobLocation = jobLocation
+
         self.groundCount = groundCount
         self.secondCount = secondCount
         self.threePlusCount = threePlusCount
         self.basementCount = basementCount
+
+        self.groundPrice = groundPrice
+        self.secondPrice = secondPrice
+        self.threePlusPrice = threePlusPrice
+        self.basementPrice = basementPrice
+
+        self.groundUnit = groundUnit
+        self.secondUnit = secondUnit
+        self.threePlusUnit = threePlusUnit
+        self.basementUnit = basementUnit
     }
 }
