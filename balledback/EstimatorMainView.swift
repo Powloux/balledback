@@ -569,16 +569,20 @@ struct EstimatorMainView: View {
                         // Keep taps inside the dropdown local
                         .highPriorityGesture(TapGesture())
                 }
+
+                // Current total row (cleaned and emphasized) with tighter gap
+                let total = Double(count.wrappedValue) * price.wrappedValue
+                HStack(spacing: 6) {
+                    Text("Current total:")
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 2) // tightened gap
+                    Text(String(format: "$%.2f", total))
+                        .font(.headline.weight(.semibold)) // match tile title emphasis
+                        .kerning(-0.1) // subtle optical tightening
+                }
+                .padding(.top, 2)
             }
             .padding(.vertical, 4)
-
-            // Expanded advanced content placeholder (above the bottom button)
-            if isExpanded.wrappedValue {
-                AdvancedOptionsBlock()
-                    .padding(.top, 2)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                    .animation(.easeInOut, value: isExpanded.wrappedValue)
-            }
 
             // Spacer to keep the Advanced button near the bottom whenever collapsed
             if !isExpanded.wrappedValue {
@@ -621,6 +625,14 @@ struct EstimatorMainView: View {
             .accessibilityLabel("Advanced Modifiers")
             .padding(.top, 4)
             .padding(.bottom, 8) // small bottom padding so it's not flush
+
+            // Expanded advanced content now appears BELOW the button
+            if isExpanded.wrappedValue {
+                AdvancedOptionsBlock()
+                    .padding(.top, 2)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .animation(.easeInOut, value: isExpanded.wrappedValue)
+            }
         }
         .padding(10)
         .frame(
@@ -722,8 +734,9 @@ struct EstimatorMainView: View {
 
                 Spacer(minLength: 6)
 
+                // Widened and centered price bubble
                 PriceField(value: $price)
-                    .frame(minWidth: 76, idealWidth: 88, maxWidth: 110, alignment: .trailing)
+                    .frame(minWidth: 85, idealWidth: 100, maxWidth: 110, alignment: .center)
             }
         }
     }
@@ -749,10 +762,6 @@ struct EstimatorMainView: View {
     private struct AdvancedOptionsBlock: View {
         var body: some View {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Advanced options coming soon…")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
                 HStack {
                     Label("Example toggle", systemImage: "slider.horizontal.3")
                     Spacer()
@@ -840,7 +849,7 @@ struct EstimatorMainView: View {
             ))
             .keyboardType(.decimalPad)
             .focused($isFocused)
-            .multilineTextAlignment(.trailing)
+            .multilineTextAlignment(.center) // centered inside the bubble
             .font(.system(size: 18, weight: .semibold, design: .rounded))
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
