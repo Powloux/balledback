@@ -161,6 +161,11 @@ struct EstimatorMainView: View {
     @State private var isThreePlusExpanded = false
     @State private var isBasementExpanded = false
 
+    // Scroll metrics for floating/locking bar
+    @State private var contentHeight: CGFloat = 0
+    @State private var viewportHeight: CGFloat = 0
+    @State private var scrollOffsetY: CGFloat = 0
+
     // Enable Save if either job name OR job location OR phone OR any window count has content
     private var hasAnyCounts: Bool {
         groundCount > 0 || secondCount > 0 || threePlusCount > 0 || basementCount > 0
@@ -196,174 +201,255 @@ struct EstimatorMainView: View {
         groundUnitMenuOpen || secondUnitMenuOpen || threePlusUnitMenuOpen || basementUnitMenuOpen
     }
 
+    // MARK: - Grand total
+
+    private let barHeight: CGFloat = 64
+    private let bottomThreshold: CGFloat = 32
+
+    private var grandTotal: Double {
+        Double(groundCount) * groundPrice
+        + Double(secondCount) * secondPrice
+        + Double(threePlusCount) * threePlusPrice
+        + Double(basementCount) * basementPrice
+    }
+
+    private var nearBottom: Bool {
+        guard contentHeight > 0, viewportHeight > 0 else { return false }
+        let maxOffset = max(0, contentHeight - viewportHeight)
+        // scrollOffsetY goes from 0 (top) to maxOffset (bottom)
+        return (maxOffset - scrollOffsetY) <= bottomThreshold
+    }
+
     init(source: EstimatorSource, existingEstimate: Estimate? = nil) {
         self.source = source
         self.existingEstimate = existingEstimate
     }
 
     var body: some View {
-        ZStack {
-            // Overlay removed for testing
+        ZStack(alignment: .bottom) {
+            // Main content with scroll tracking
+            GeometryReader { outerGeo in
+                let vpHeight = outerGeo.size.height
+                Color.clear
+                    .onAppear { viewportHeight = vpHeight }
+                    .onChange(of: vpHeight) { _, newVal in viewportHeight = newVal }
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        // Job Name input
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Job Name")
+                                .font(.headline)
 
-                    // Job Name input
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Job Name")
-                            .font(.headline)
+                            TextField("Enter job name", text: $jobName)
+                                .textInputAutocapitalization(.words)
+                                .submitLabel(.done)
+                                .textFieldStyle(.roundedBorder)
+                                .focused($jobNameFocused)
+                        }
 
-                        TextField("Enter job name", text: $jobName)
+                        // Phone Number input (digits only)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Phone Number")
+                                .font(.headline)
+
+                            TextField("Enter phone number", text: $phoneNumber)
+                                .keyboardType(.numberPad)
+                                .textInputAutocapitalization(.never)
+                                .submitLabel(.done)
+                                .textFieldStyle(.roundedBorder)
+                                .onChange(of: phoneNumber) { _, newValue in
+                                    let filtered = newValue.filter { $0.isNumber }
+                                    if filtered != newValue {
+                                        phoneNumber = filtered
+                                    }
+                                }
+                        }
+
+                        // Job Location input with suggestions
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Job Location")
+                                .font(.headline)
+
+                            TextField("Enter job location", text: $jobLocation, onEditingChanged: { isEditing in
+                                showSuggestions = isEditing && !jobLocation.isEmpty
+                            })
                             .textInputAutocapitalization(.words)
                             .submitLabel(.done)
                             .textFieldStyle(.roundedBorder)
-                            .focused($jobNameFocused)
-                    }
-
-                    // Phone Number input (digits only)
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Phone Number")
-                            .font(.headline)
-
-                        TextField("Enter phone number", text: $phoneNumber)
-                            .keyboardType(.numberPad)
-                            .textInputAutocapitalization(.never)
-                            .submitLabel(.done)
-                            .textFieldStyle(.roundedBorder)
-                            .onChange(of: phoneNumber) { _, newValue in
-                                let filtered = newValue.filter { $0.isNumber }
-                                if filtered != newValue {
-                                    phoneNumber = filtered
-                                }
+                            .onChange(of: jobLocation) { _, newValue in
+                                searchModel.query = newValue
+                                showSuggestions = !newValue.isEmpty
                             }
-                    }
 
-                    // Job Location input with suggestions
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Job Location")
-                            .font(.headline)
-
-                        TextField("Enter job location", text: $jobLocation, onEditingChanged: { isEditing in
-                            showSuggestions = isEditing && !jobLocation.isEmpty
-                        })
-                        .textInputAutocapitalization(.words)
-                        .submitLabel(.done)
-                        .textFieldStyle(.roundedBorder)
-                        .onChange(of: jobLocation) { _, newValue in
-                            searchModel.query = newValue
-                            showSuggestions = !newValue.isEmpty
-                        }
-
-                        if showSuggestions && !searchModel.results.isEmpty {
-                            VStack(spacing: 0) {
-                                ForEach(searchModel.results, id: \.self) { item in
-                                    Button {
-                                        let combined = item.title.isEmpty ? item.subtitle : "\(item.title) \(item.subtitle)"
-                                        jobLocation = combined.trimmingCharacters(in: .whitespacesAndNewlines)
-                                        showSuggestions = false
-                                    } label: {
-                                        HStack(alignment: .top, spacing: 8) {
-                                            Image(systemName: "mappin.and.ellipse")
-                                                .foregroundStyle(.secondary)
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text(item.title)
-                                                    .foregroundStyle(.primary)
-                                                if !item.subtitle.isEmpty {
-                                                    Text(item.subtitle)
-                                                        .foregroundStyle(.secondary)
-                                                        .font(.subheadline)
+                            if showSuggestions && !searchModel.results.isEmpty {
+                                VStack(spacing: 0) {
+                                    ForEach(searchModel.results, id: \.self) { item in
+                                        Button {
+                                            let combined = item.title.isEmpty ? item.subtitle : "\(item.title) \(item.subtitle)"
+                                            jobLocation = combined.trimmingCharacters(in: .whitespacesAndNewlines)
+                                            showSuggestions = false
+                                        } label: {
+                                            HStack(alignment: .top, spacing: 8) {
+                                                Image(systemName: "mappin.and.ellipse")
+                                                    .foregroundStyle(.secondary)
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text(item.title)
+                                                        .foregroundStyle(.primary)
+                                                    if !item.subtitle.isEmpty {
+                                                        Text(item.subtitle)
+                                                            .foregroundStyle(.secondary)
+                                                            .font(.subheadline)
+                                                    }
                                                 }
+                                                Spacer()
                                             }
-                                            Spacer()
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 10)
                                         }
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 10)
-                                    }
-                                    .buttonStyle(.plain)
+                                        .buttonStyle(.plain)
 
-                                    if item != searchModel.results.last {
-                                        Divider()
+                                        if item != searchModel.results.last {
+                                            Divider()
+                                        }
                                     }
                                 }
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(Color(.systemBackground))
+                                        .shadow(color: .black.opacity(0.1), radius: 6, x: 0, y: 3)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(Color(.separator), lineWidth: 0.5)
+                                )
                             }
-                            .background(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(Color(.systemBackground))
-                                    .shadow(color: .black.opacity(0.1), radius: 6, x: 0, y: 3)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(Color(.separator), lineWidth: 0.5)
-                            )
+                        }
+
+                        // Window Categories (fixed 2x2 grid of tiles)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Exterior")
+                                .font(.headline)
+
+                            let columns = [
+                                GridItem(.flexible(), spacing: 35, alignment: .top),
+                                GridItem(.flexible(), spacing: 12, alignment: .top)
+                            ]
+
+                            LazyVGrid(columns: columns, alignment: .center, spacing: 5) {
+                                categoryTile(
+                                    title: "Ground Level",
+                                    count: $groundCount,
+                                    color: .blue,
+                                    isExpanded: $isGroundExpanded,
+                                    price: $groundPrice,
+                                    unit: $groundUnit,
+                                    isUnitMenuOpen: $groundUnitMenuOpen
+                                )
+                                .scaleEffect(0.95)
+
+                                categoryTile(
+                                    title: "Second Story",
+                                    count: $secondCount,
+                                    color: .teal,
+                                    isExpanded: $isSecondExpanded,
+                                    price: $secondPrice,
+                                    unit: $secondUnit,
+                                    isUnitMenuOpen: $secondUnitMenuOpen
+                                )
+                                .scaleEffect(0.95)
+
+                                categoryTile(
+                                    title: "3+ Story",
+                                    count: $threePlusCount,
+                                    color: .purple,
+                                    isExpanded: $isThreePlusExpanded,
+                                    price: $threePlusPrice,
+                                    unit: $threePlusUnit,
+                                    isUnitMenuOpen: $threePlusUnitMenuOpen
+                                )
+                                .scaleEffect(0.95)
+
+                                categoryTile(
+                                    title: "Basement",
+                                    count: $basementCount,
+                                    color: .indigo,
+                                    isExpanded: $isBasementExpanded,
+                                    price: $basementPrice,
+                                    unit: $basementUnit,
+                                    isUnitMenuOpen: $basementUnitMenuOpen
+                                )
+                                .scaleEffect(0.95)
+                            }
+                            .padding(.top, 2)
+                            .padding(.horizontal, 7)
+                        }
+
+                        // Footer version of the Grand Total bar when near bottom (locks in)
+                        if nearBottom {
+                            GrandTotalBar(total: grandTotal)
+                                .frame(height: barHeight)
+                                .padding(.top, 8)
+                        }
+
+                        // Spacer to avoid overlay overlap
+                        // Keep only when floating (not near bottom) so last content is reachable
+                        if !nearBottom {
+                            Spacer().frame(height: barHeight + 12)
                         }
                     }
-
-                    // Window Categories (fixed 2x2 grid of tiles)
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Exterior")
-                            .font(.headline)
-
-                        // Exactly two columns; add a small central gutter.
-                        let columns = [
-                            GridItem(.flexible(), spacing: 35, alignment: .top),
-                            GridItem(.flexible(), spacing: 12, alignment: .top)
-                        ]
-
-                        // spacing: vertical spacing between rows
-                        LazyVGrid(columns: columns, alignment: .center, spacing: 5) {
-                            categoryTile(
-                                title: "Ground Level",
-                                count: $groundCount,
-                                color: .blue,
-                                isExpanded: $isGroundExpanded,
-                                price: $groundPrice,
-                                unit: $groundUnit,
-                                isUnitMenuOpen: $groundUnitMenuOpen
-                            )
-                            .scaleEffect(0.95)
-
-                            categoryTile(
-                                title: "Second Story",
-                                count: $secondCount,
-                                color: .teal,
-                                isExpanded: $isSecondExpanded,
-                                price: $secondPrice,
-                                unit: $secondUnit,
-                                isUnitMenuOpen: $secondUnitMenuOpen
-                            )
-                            .scaleEffect(0.95)
-
-                            categoryTile(
-                                title: "3+ Story",
-                                count: $threePlusCount,
-                                color: .purple,
-                                isExpanded: $isThreePlusExpanded,
-                                price: $threePlusPrice,
-                                unit: $threePlusUnit,
-                                isUnitMenuOpen: $threePlusUnitMenuOpen
-                            )
-                            .scaleEffect(0.95)
-
-                            categoryTile(
-                                title: "Basement",
-                                count: $basementCount,
-                                color: .indigo,
-                                isExpanded: $isBasementExpanded,
-                                price: $basementPrice,
-                                unit: $basementUnit,
-                                isUnitMenuOpen: $basementUnitMenuOpen
-                            )
-                            .scaleEffect(0.95)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+                    .background(
+                        GeometryReader { contentGeo in
+                            Color.clear
+                                .preference(key: ScrollMetricsPreferenceKey.self, value: ScrollMetrics(
+                                    contentHeight: contentGeo.size.height
+                                ))
                         }
-                        .padding(.top, 2)
-                        .padding(.horizontal, 7) // Outer gutters so tiles don't hug screen edges
-                    }
+                    )
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
-                // simultaneousGesture removed for testing
+                // Named coordinate space so ScrollOffsetReader can measure offset
+                .coordinateSpace(name: "ScrollArea")
+                .background(
+                    GeometryReader { scrollGeo in
+                        Color.clear
+                            .onAppear { viewportHeight = scrollGeo.size.height }
+                            .onChange(of: scrollGeo.size.height) { _, newVal in viewportHeight = newVal }
+                    }
+                )
+            }
+
+            // Floating overlay version when not near bottom
+            if !nearBottom {
+                GrandTotalBar(total: grandTotal)
+                    .frame(height: barHeight)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .onPreferenceChange(ScrollMetricsPreferenceKey.self) { metrics in
+            // Update content height if provided
+            if let ch = metrics.contentHeight {
+                contentHeight = ch
+            }
+        }
+        .background(
+            GeometryReader { geo in
+                // Track scroll offset by comparing the minY of the content within the outer space
+                Color.clear
+                    .onAppear {
+                        viewportHeight = geo.size.height
+                    }
+                    .overlay(
+                        ScrollOffsetReader(offsetChanged: { offset in
+                            scrollOffsetY = offset
+                        })
+                    )
+            }
+        )
+
         .navigationTitle(existingEstimate == nil ? "" : "Edit Estimate")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
@@ -538,13 +624,14 @@ struct EstimatorMainView: View {
         isUnitMenuOpen: Binding<Bool>
     ) -> some View {
         let collapsedHeight: CGFloat = 300
+        // FIX: use .opacity (static), not .opacity()
         let dropdownTransition: AnyTransition = .opacity.combined(with: .move(edge: .top))
 
         VStack(spacing: 8) {
             Text(title)
                 .font(.headline)
                 .frame(maxWidth: .infinity, alignment: .center)
-                .multilineTextAlignment(.center)
+            .multilineTextAlignment(.center)
 
             // Controls row: − [count] +
             CountControlsRow(count: count)
@@ -948,6 +1035,74 @@ struct EstimatorMainView: View {
             store.add(trimmed, from: source)
         }
         dismiss()
+    }
+}
+
+// MARK: - Scroll metrics tracking
+
+private struct ScrollMetrics: Equatable {
+    var contentHeight: CGFloat?
+}
+
+private struct ScrollMetricsPreferenceKey: PreferenceKey {
+    static var defaultValue: ScrollMetrics = ScrollMetrics(contentHeight: nil)
+    static func reduce(value: inout ScrollMetrics, nextValue: () -> ScrollMetrics) {
+        let next = nextValue()
+        if let ch = next.contentHeight {
+            value.contentHeight = ch
+        }
+    }
+}
+
+// Helper to read scroll offset by anchoring to a named coordinate space
+private struct ScrollOffsetReader: View {
+    let offsetChanged: (CGFloat) -> Void
+
+    var body: some View {
+        GeometryReader { geo in
+            Color.clear
+                .preference(key: ScrollOffsetPreferenceKey.self, value: geo.frame(in: .named("ScrollArea")).minY * -1)
+        }
+        .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
+            offsetChanged(value)
+        }
+    }
+}
+
+private struct ScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+// Grand total bar view
+private struct GrandTotalBar: View {
+    let total: Double
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("Grand total:")
+                .foregroundStyle(.secondary)
+
+            Spacer(minLength: 8)
+
+            Text(String(format: "$%.2f", total))
+                .font(.headline.weight(.semibold))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(.secondarySystemBackground))
+                .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 3)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(.separator), lineWidth: 0.5)
+        )
+        .padding(.horizontal, 16)
     }
 }
 
