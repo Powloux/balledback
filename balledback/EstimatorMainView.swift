@@ -1725,6 +1725,9 @@ private struct WindowCategoriesGrid: View {
         @Binding var tileCount: Int
         @Binding var basePrice: Double
 
+        // Track which modifiers are expanded (collapsed by default)
+        @State private var expanded: Set<UUID> = []
+
         init(modifiers: Binding<[AdvancedModifierItem]>, tileCount: Binding<Int>, basePrice: Binding<Double>) {
             self._modifiers = modifiers
             self._tileCount = tileCount
@@ -1736,11 +1739,21 @@ private struct WindowCategoriesGrid: View {
                 // Preserve original insertion order (no sorting)
                 ForEach(modifiers) { item in
                     if let idx = modifiers.firstIndex(where: { $0.id == item.id }) {
-                        ModifierRow(
+                        CollapsibleModifierRow(
                             item: $modifiers[idx],
                             maxAllowed: maxAllowed(for: item.id),
                             tileCount: $tileCount,
-                            basePrice: $basePrice
+                            basePrice: $basePrice,
+                            isExpanded: Binding(
+                                get: { expanded.contains(item.id) },
+                                set: { newVal in
+                                    if newVal {
+                                        expanded.insert(item.id)
+                                    } else {
+                                        expanded.remove(item.id)
+                                    }
+                                }
+                            )
                         )
                     }
                 }
@@ -1753,6 +1766,17 @@ private struct WindowCategoriesGrid: View {
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 6)
+            }
+            .onChange(of: tileCount) { _, _ in
+                // Clamp any quantities that exceed new tileCount
+                for i in modifiers.indices {
+                    if modifiers[i].quantity > tileCount {
+                        modifiers[i].quantity = tileCount
+                    }
+                    if modifiers[i].quantity < 0 {
+                        modifiers[i].quantity = 0
+                    }
+                }
             }
         }
 
@@ -1770,126 +1794,182 @@ private struct WindowCategoriesGrid: View {
             // Defer to next runloop tick and disable implicit animation to avoid Canvas thrash.
             DispatchQueue.main.async {
                 Preview.disableAnimations {
-                    modifiers.append(AdvancedModifierItem(name: defaultName, isCustom: true))
+                    let new = AdvancedModifierItem(name: defaultName, isCustom: true)
+                    modifiers.append(new)
+                    // Start collapsed by default (do nothing to expanded set)
                 }
             }
         }
 
-        private struct ModifierRow: View {
+        // Collapsible row wrapper around the previous ModifierRow content
+        private struct CollapsibleModifierRow: View {
             @Binding var item: AdvancedModifierItem
             let maxAllowed: Int
 
             @Binding var tileCount: Int
             @Binding var basePrice: Double
 
+            @Binding var isExpanded: Bool
+
+            // Local text fields for inputs
             @State private var priceText: String = ""
             @State private var multiplierText: String = ""
 
             var body: some View {
-                VStack(alignment: .leading, spacing: 8) {
-                    // Title / name (editable if custom)
-                    if item.isCustom {
-                        TextField("Custom name", text: $item.name)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.subheadline.weight(.semibold))
-                    } else {
-                        Text(item.name)
-                            .font(.subheadline.weight(.semibold))
-                    }
+                // Determine highlight state: collapsed and has quantity
+                let hasSelection = item.quantity > 0
+                let isCollapsed = !isExpanded
+                let highlight = hasSelection && isCollapsed
 
-                    // Mode selector (keep enum but adjust visible labels)
-                    Picker("", selection: $item.mode) {
-                        Text("Add $").tag(AdvancedModifierMode.price)
-                        Text("Multiply").tag(AdvancedModifierMode.multiplier)
-                    }
-                    .pickerStyle(.segmented)
-
-                    // Quantity chooser with max constraint
-                    QuantityControlsRow(quantity: $item.quantity, maxAllowed: maxAllowed)
-
-                    // Input field based on mode with clearer phrasing
-                    VStack(alignment: .leading, spacing: 4) {
-                        if item.mode == .price {
-                            HStack(spacing: 6) {
-                                Text("Add")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                PriceInput(value: $item.priceValue, text: $priceText)
-                                Text("each")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                Spacer(minLength: 0)
-                            }
-                        } else {
-                            HStack(spacing: 6) {
-                                Text("Multiply by")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                MultiplierInput(value: $item.multiplierValue, text: $multiplierText)
-                                Text("each")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                Spacer(minLength: 0)
+                VStack(spacing: 0) {
+                    // Header (collapsed appearance inside the same bubble)
+                    Button {
+                        withAnimation(Preview.isActive ? nil : .easeInOut) {
+                            isExpanded.toggle()
+                        }
+                    } label: {
+                        HStack(alignment: .center, spacing: 10) {
+                            if item.isCustom {
+                                Text(item.name.isEmpty ? "Custom" : item.name)
+                                    .font(.subheadline.weight(.semibold))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } else {
+                                Text(item.name)
+                                    .font(.subheadline.weight(.semibold))
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
 
-                            // Helper delta percent
-                            let deltaPct = max(0, item.multiplierValue - 1.0) * 100.0
-                            Text(String(format: "Adds +%.0f%% of base per window", deltaPct))
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                            Spacer()
 
-                    // Live contribution preview
-                    if item.quantity > 0 {
-                        let qty = Double(min(item.quantity, tileCount))
-                        if item.mode == .price {
-                            let add = qty * max(0, item.priceValue)
-                            ContributionLine(label: "Adds", amount: add)
-                        } else {
-                            let delta = max(0, item.multiplierValue - 1.0)
-                            let add = qty * max(0, basePrice) * delta
-                            ContributionLine(label: "Adds", amount: add)
+                            Image(systemName: "chevron.down")
+                                .font(.subheadline.weight(.semibold))
+                                .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                                .animation(Preview.isActive ? nil : .easeInOut(duration: 0.2), value: isExpanded)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, isExpanded ? 10 : 8) // a bit tighter when collapsed
+                        .contentShape(Rectangle())
+                        .foregroundStyle(highlight ? Color.white : Color.primary)
+                    }
+                    .buttonStyle(.plain)
+
+                    if isExpanded {
+                        Divider().padding(.horizontal, 12)
+                            .transition(.opacity)
+
+                        // Expanded editor content within same bubble
+                        VStack(alignment: .leading, spacing: 10) {
+                            // Editable name if custom
+                            if item.isCustom {
+                                TextField("Custom name", text: $item.name)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.subheadline.weight(.semibold))
+                            }
+
+                            // Mode selector
+                            Picker("", selection: $item.mode) {
+                                Text("Add $").tag(AdvancedModifierMode.price)
+                                Text("Multiply").tag(AdvancedModifierMode.multiplier)
+                            }
+                            .pickerStyle(.segmented)
+
+                            // Quantity chooser with max constraint
+                            QuantityControlsRow(quantity: $item.quantity, maxAllowed: maxAllowed)
+
+                            // Input field based on mode
+                            VStack(alignment: .leading, spacing: 4) {
+                                if item.mode == .price {
+                                    HStack(spacing: 6) {
+                                        Text("Add")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                        PriceInput(value: $item.priceValue, text: $priceText)
+                                        Text("each")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                        Spacer(minLength: 0)
+                                    }
+                                } else {
+                                    HStack(spacing: 6) {
+                                        Text("Multiply by")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                        MultiplierInput(value: $item.multiplierValue, text: $multiplierText)
+                                        Text("each")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                        Spacer(minLength: 0)
+                                    }
+
+                                    // Helper delta percent
+                                    let deltaPct = max(0, item.multiplierValue - 1.0) * 100.0
+                                    Text(String(format: "Adds +%.0f%% of base per window", deltaPct))
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            // Live contribution preview
+                            if item.quantity > 0 {
+                                let qty = Double(min(item.quantity, tileCount))
+                                if item.mode == .price {
+                                    let add = qty * max(0, item.priceValue)
+                                    ContributionLine(label: "Adds", amount: add)
+                                } else {
+                                    let delta = max(0, item.multiplierValue - 1.0)
+                                    let add = qty * max(0, basePrice) * delta
+                                    ContributionLine(label: "Adds", amount: add)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 12)
+                        .transition(.previewSafe(.opacity.combined(with: .move(edge: .top))))
+                        .onAppear {
+                            // Clamp to max on appear (in case tile count decreased)
+                            if item.quantity > maxAllowed {
+                                item.quantity = maxAllowed
+                            }
+                            if priceText.isEmpty {
+                                priceText = ModifierRow.currencyString(from: item.priceValue)
+                            }
+                            if multiplierText.isEmpty {
+                                multiplierText = ModifierRow.multiplierString(from: item.multiplierValue)
+                            }
+                        }
+                        .onChange(of: maxAllowed) { _, newMax in
+                            if item.quantity > newMax {
+                                item.quantity = newMax
+                            }
+                            if item.quantity < 0 {
+                                item.quantity = 0
+                            }
+                        }
+                        .onChange(of: item.priceValue) { _, newVal in
+                            let cur = ModifierRow.parseCurrency(priceText)
+                            if abs(cur - newVal) > 0.0001 {
+                                priceText = ModifierRow.currencyString(from: newVal)
+                            }
+                        }
+                        .onChange(of: item.multiplierValue) { _, newVal in
+                            let cur = ModifierRow.parseMultiplier(multiplierText)
+                            if abs(cur - newVal) > 0.0001 {
+                                multiplierText = ModifierRow.multiplierString(from: newVal)
+                            }
                         }
                     }
                 }
-                .onAppear {
-                    // Clamp to max on appear (in case tile count decreased)
-                    if item.quantity > maxAllowed {
-                        item.quantity = maxAllowed
-                    }
-                    if priceText.isEmpty {
-                        priceText = Self.currencyString(from: item.priceValue)
-                    }
-                    if multiplierText.isEmpty {
-                        multiplierText = Self.multiplierString(from: item.multiplierValue)
-                    }
-                }
-                .onChange(of: maxAllowed) { _, newMax in
-                    if item.quantity > newMax {
-                        item.quantity = newMax
-                    }
-                    if item.quantity < 0 {
-                        item.quantity = 0
-                    }
-                }
-                .onChange(of: item.priceValue) { _, newVal in
-                    let cur = Self.parseCurrency(priceText)
-                    if abs(cur - newVal) > 0.0001 {
-                        priceText = Self.currencyString(from: newVal)
-                    }
-                }
-                .onChange(of: item.multiplierValue) { _, newVal in
-                    let cur = Self.parseMultiplier(multiplierText)
-                    if abs(cur - newVal) > 0.0001 {
-                        multiplierText = Self.multiplierString(from: newVal)
-                    }
-                }
-                .padding(10)
+                // Single bubble background that wraps both collapsed and expanded states
                 .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color(.tertiarySystemBackground))
+                    RoundedRectangle(cornerRadius: 22)
+                        .fill(highlight ? Color.blue : Color(.secondarySystemBackground))
+                        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
                 )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22)
+                        .stroke(highlight ? Color.blue : Color(.separator), lineWidth: 0.5)
+                )
+                .padding(.vertical, 4)
             }
 
             private struct ContributionLine: View {
@@ -1928,7 +2008,7 @@ private struct WindowCategoriesGrid: View {
                             Image(systemName: "minus")
                                 .font(.system(size: 18, weight: .semibold))
                                 .frame(width: 44, height: 36)
-                                .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+                                .background(RoundedRectangle(cornerRadius: 8).fill(Color(.tertiarySystemBackground)))
                         }
                         .disabled(quantity == 0)
 
@@ -1943,7 +2023,7 @@ private struct WindowCategoriesGrid: View {
                             Image(systemName: "plus")
                                 .font(.system(size: 18, weight: .semibold))
                                 .frame(width: 44, height: 36)
-                                .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+                                .background(RoundedRectangle(cornerRadius: 8).fill(Color(.tertiarySystemBackground)))
                         }
                         .disabled(quantity >= maxAllowed)
                     }
@@ -1984,7 +2064,7 @@ private struct WindowCategoriesGrid: View {
                         .padding(.vertical, 4)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
-                                .fill(Color(.secondarySystemBackground))
+                                .fill(Color(.tertiarySystemBackground))
                         )
                         .onAppear {
                             text = String(count)
@@ -2004,71 +2084,73 @@ private struct WindowCategoriesGrid: View {
                 }
             }
 
-            // MARK: - Static helpers to allow nested types to call them
-            static func currencyString(from v: Double) -> String {
-                String(format: "$%.2f", v)
-            }
-            static func multiplierString(from v: Double) -> String {
-                if abs(v.rounded() - v) < 0.0001 {
-                    return "x\(Int(v))"
+            // Reuse static helpers from the original ModifierRow
+            private struct ModifierRow {
+                static func currencyString(from v: Double) -> String {
+                    String(format: "$%.2f", v)
                 }
-                return "x\(v)"
-            }
-            static func parseCurrency(_ s: String) -> Double {
-                Double(s.replacingOccurrences(of: "$", with: "")) ?? 0
-            }
-            static func parseMultiplier(_ s: String) -> Double {
-                Double(s.replacingOccurrences(of: "x", with: "")) ?? 1.0
-            }
-            static func filterCurrency(_ s: String) -> String {
-                var result = ""
-                var hasDot = false
-                var hasDollar = false
-
-                for (i, ch) in s.enumerated() {
-                    if ch == "$" && !hasDollar && i == 0 {
-                        result.append(ch)
-                        hasDollar = true
-                    } else if ch.isNumber {
-                        result.append(ch)
-                    } else if ch == "." && !hasDot {
-                        result.append(ch)
-                        hasDot = true
+                static func multiplierString(from v: Double) -> String {
+                    if abs(v.rounded() - v) < 0.0001 {
+                        return "x\(Int(v))"
                     }
+                    return "x\(v)"
                 }
+                static func parseCurrency(_ s: String) -> Double {
+                    Double(s.replacingOccurrences(of: "$", with: "")) ?? 0
+                }
+                static func parseMultiplier(_ s: String) -> Double {
+                    Double(s.replacingOccurrences(of: "x", with: "")) ?? 1.0
+                }
+                static func filterCurrency(_ s: String) -> String {
+                    var result = ""
+                    var hasDot = false
+                    var hasDollar = false
 
-                if !result.hasPrefix("$") {
-                    result = "$" + result
-                }
-                if result == "$" || result == "$." {
-                    result = "$0"
-                }
-                return result
-            }
-            static func filterMultiplier(_ s: String) -> String {
-                var result = ""
-                var hasDot = false
-                var hasX = false
-
-                for (i, ch) in s.enumerated() {
-                    if (ch == "x" || ch == "X") && !hasX && i == 0 {
-                        result.append("x")
-                        hasX = true
-                    } else if ch.isNumber {
-                        result.append(ch)
-                    } else if ch == "." && !hasDot {
-                        result.append(ch)
-                        hasDot = true
+                    for (i, ch) in s.enumerated() {
+                        if ch == "$" && !hasDollar && i == 0 {
+                            result.append(ch)
+                            hasDollar = true
+                        } else if ch.isNumber {
+                            result.append(ch)
+                        } else if ch == "." && !hasDot {
+                            result.append(ch)
+                            hasDot = true
+                        }
                     }
-                }
 
-                if !result.hasPrefix("x") {
-                    result = "x" + result
+                    if !result.hasPrefix("$") {
+                        result = "$" + result
+                    }
+                    if result == "$" || result == "$." {
+                        result = "$0"
+                    }
+                    return result
                 }
-                if result == "x" || result == "x." {
-                    return "x1"
+                static func filterMultiplier(_ s: String) -> String {
+                    var result = ""
+                    var hasDot = false
+                    var hasX = false
+
+                    for (i, ch) in s.enumerated() {
+                        if (ch == "x" || ch == "X") && !hasX && i == 0 {
+                            result.append("x")
+                            hasX = true
+                        } else if ch.isNumber {
+                            result.append(ch)
+                        } else if ch == "." && !hasDot {
+                            result.append(ch)
+                            hasDot = true
+                        }
+                    }
+
+                    if !result.hasPrefix("x") {
+                        result = "x" + result
+                    }
+                    if result == "x" || result == "x." {
+                        return "x1"
+                    }
+                    return result
                 }
-                return result
             }
 
             // Price input similar to other currency fields
@@ -2102,7 +2184,7 @@ private struct WindowCategoriesGrid: View {
                     .padding(.vertical, 8)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(.secondarySystemBackground))
+                            .fill(Color(.tertiarySystemBackground))
                     )
                     .onChange(of: focused) { _, f in
                         if !f {
@@ -2143,7 +2225,7 @@ private struct WindowCategoriesGrid: View {
                     .padding(.vertical, 8)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(.secondarySystemBackground))
+                            .fill(Color(.tertiarySystemBackground))
                     )
                     .onChange(of: focused) { _, f in
                         if !f {
