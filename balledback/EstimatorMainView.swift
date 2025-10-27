@@ -748,32 +748,192 @@ private struct BottomItemizationView: View {
     let baseSubtotal: Double
     let modifiersSubtotal: Double
 
+    // Inputs required to render breakdowns
+    var groundCount: Int = 0
+    var secondCount: Int = 0
+    var threePlusCount: Int = 0
+    var basementCount: Int = 0
+
+    var groundPrice: Double = 0
+    var secondPrice: Double = 0
+    var threePlusPrice: Double = 0
+    var basementPrice: Double = 0
+
+    var groundModifiers: [AdvancedModifierItem] = []
+    var secondModifiers: [AdvancedModifierItem] = []
+    var threePlusModifiers: [AdvancedModifierItem] = []
+    var basementModifiers: [AdvancedModifierItem] = []
+
+    // Expansion toggles for each card
+    @State private var showBaseBreakdown = false
+    @State private var showModifiersBreakdown = false
+
+   
     var body: some View {
         VStack(spacing: 12) {
             ItemRowCard(
                 title: "Window Total",
-                amount: baseSubtotal
-            )
+                amount: baseSubtotal,
+                isExpanded: $showBaseBreakdown
+            ) {
+                VStack(alignment: .leading, spacing: 6) {
+                    // Per-category lines (only if count > 0)
+                    categoryLine(title: "Ground", count: groundCount, price: groundPrice)
+                    categoryLine(title: "Second", count: secondCount, price: secondPrice)
+                    categoryLine(title: "3+ Story", count: threePlusCount, price: threePlusPrice)
+                    categoryLine(title: "Basement", count: basementCount, price: basementPrice)
+
+                    Divider().padding(.vertical, 4)
+
+                    HStack {
+                        Text("Subtotal")
+                            .font(.footnote.weight(.semibold))
+                        Spacer()
+                        Text(currency(baseSubtotal))
+                            .font(.footnote.weight(.semibold))
+                    }
+                }
+                .transition(.previewSafe(.opacity.combined(with: .move(edge: .top))))
+            }
 
             ItemRowCard(
                 title: "Modifiers total",
-                amount: modifiersSubtotal
-            )
+                amount: modifiersSubtotal,
+                isExpanded: $showModifiersBreakdown
+            ) {
+                VStack(alignment: .leading, spacing: 6) {
+                    // Per-modifier contributions by tile
+                    modifierSection(title: "Ground", count: groundCount, basePrice: groundPrice, modifiers: groundModifiers)
+                    modifierSection(title: "Second", count: secondCount, basePrice: secondPrice, modifiers: secondModifiers)
+                    modifierSection(title: "3+ Story", count: threePlusCount, basePrice: threePlusPrice, modifiers: threePlusModifiers)
+                    modifierSection(title: "Basement", count: basementCount, basePrice: basementPrice, modifiers: basementModifiers)
+
+                    Divider().padding(.vertical, 4)
+
+                    HStack {
+                        Text("Subtotal")
+                            .font(.footnote.weight(.semibold))
+                        Spacer()
+                        Text(currency(modifiersSubtotal))
+                            .font(.footnote.weight(.semibold))
+                    }
+                }
+                .transition(.previewSafe(.opacity.combined(with: .move(edge: .top))))
+            }
         }
-        .padding(.horizontal, 4) // small breathing room relative to surrounding padding
+        .padding(.horizontal, 4)
     }
 
-    private struct ItemRowCard: View {
-        let title: String
-        let amount: Double
+    private func currency(_ v: Double) -> String {
+        String(format: "$%.2f", v)
+    }
 
-        var body: some View {
+    @ViewBuilder
+    private func categoryLine(title: String, count: Int, price: Double) -> some View {
+        if count > 0, price >= 0 {
+            let subtotal = Double(count) * max(0, price)
             HStack {
-                Text(title)
+                Text(title + ":")
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text(String(format: "$%.2f", amount))
-                    .font(.subheadline.weight(.semibold))
+                Text("\(count) × \(currency(max(0, price))) = \(currency(subtotal))")
+            }
+            .font(.footnote)
+        } else {
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func modifierSection(title: String, count: Int, basePrice: Double, modifiers: [AdvancedModifierItem]) -> some View {
+        let safeBase = max(0, basePrice)
+        let active = modifiers.filter { $0.quantity > 0 }
+        if count > 0, !active.isEmpty, safeBase >= 0 {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                ForEach(active) { mod in
+                    if mod.mode == .price, mod.priceValue >= 0 {
+                        let qty = Double(min(mod.quantity, count))
+                        let add = qty * mod.priceValue
+                        if add > 0 {
+                            HStack {
+                                Text("\(mod.name):")
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text("\(Int(qty)) × \(currency(mod.priceValue)) = \(currency(add))")
+                            }
+                            .font(.footnote)
+                        }
+                    } else if mod.mode == .multiplier, mod.multiplierValue >= 0 {
+                        let qty = Double(min(mod.quantity, count))
+                        let delta = max(0, mod.multiplierValue - 1.0)
+                        let add = qty * safeBase * delta
+                        if add > 0 {
+                            HStack {
+                                Text("\(mod.name):")
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text("\(Int(qty)) × \(currency(safeBase)) × (x\(trim(mult: mod.multiplierValue)) − 1) = \(currency(add))")
+                            }
+                            .font(.footnote)
+                        }
+                    }
+                }
+            }
+            .padding(8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.tertiarySystemBackground))
+            )
+        } else {
+            EmptyView()
+        }
+    }
+
+    private func trim(mult v: Double) -> String {
+        if abs(v.rounded() - v) < 0.0001 {
+            return "\(Int(v))"
+        }
+        return String(v)
+    }
+
+    private struct ItemRowCard<Expanded: View>: View {
+        let title: String
+        let amount: Double
+        @Binding var isExpanded: Bool
+        @ViewBuilder var expandedContent: () -> Expanded
+
+        var body: some View {
+            VStack(spacing: 8) {
+                HStack {
+                    Text(title)
+                        .foregroundStyle(.secondary)
+
+                    Image(systemName: "chevron.down")
+                        .font(.subheadline.weight(.semibold))
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                        .animation(Preview.isActive ? nil : .easeInOut(duration: 0.2), value: isExpanded)
+                        .padding(.leading, 6)
+
+                    Spacer()
+
+                    Text(String(format: "$%.2f", amount))
+                        .font(.subheadline.weight(.semibold))
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(Preview.isActive ? nil : .easeInOut) {
+                        isExpanded.toggle()
+                    }
+                }
+
+                if isExpanded {
+                    expandedContent()
+                        .padding(.top, 4)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -908,7 +1068,19 @@ private struct ScrollContent: View {
                 // Bottom itemization section
                 BottomItemizationView(
                     baseSubtotal: baseSubtotal,
-                    modifiersSubtotal: modifiersSubtotal
+                    modifiersSubtotal: modifiersSubtotal,
+                    groundCount: groundCount,
+                    secondCount: secondCount,
+                    threePlusCount: threePlusCount,
+                    basementCount: basementCount,
+                    groundPrice: groundPrice,
+                    secondPrice: secondPrice,
+                    threePlusPrice: threePlusPrice,
+                    basementPrice: basementPrice,
+                    groundModifiers: groundModifiers,
+                    secondModifiers: secondModifiers,
+                    threePlusModifiers: threePlusModifiers,
+                    basementModifiers: basementModifiers
                 )
                 .padding(.top, 8)
 
@@ -1232,7 +1404,7 @@ private struct WindowCategoriesGrid: View {
             Text(title)
                 .font(.headline)
                 .frame(maxWidth: .infinity, alignment: Alignment.center)
-                .multilineTextAlignment(.center)
+            .multilineTextAlignment(.center)
 
             CountControlsRow(count: count)
 
@@ -1561,12 +1733,8 @@ private struct WindowCategoriesGrid: View {
 
         var body: some View {
             VStack(alignment: .leading, spacing: 10) {
-                // Optional visual ordering: active first
-                let sorted = modifiers.sorted { lhs, rhs in
-                    (lhs.quantity > 0 ? 0 : 1, lhs.name) < (rhs.quantity > 0 ? 0 : 1, rhs.name)
-                }
-
-                ForEach(sorted) { item in
+                // Preserve original insertion order (no sorting)
+                ForEach(modifiers) { item in
                     if let idx = modifiers.firstIndex(where: { $0.id == item.id }) {
                         ModifierRow(
                             item: $modifiers[idx],
