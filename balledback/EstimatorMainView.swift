@@ -665,6 +665,7 @@ private struct ScrollOffsetReader: View {
 private struct ScrollOffsetPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        // Use the latest reported offset (no summation to avoid ambiguity)
         value = nextValue()
     }
 }
@@ -1140,7 +1141,7 @@ private struct WindowCategoriesGrid: View {
                         .highPriorityGesture(TapGesture())
                 }
 
-                // New total logic applying advanced modifiers as per-window replacements
+                // New total logic applying advanced modifiers as additive lines
                 let total = tileTotal(
                     count: count.wrappedValue,
                     basePrice: price.wrappedValue,
@@ -1200,10 +1201,13 @@ private struct WindowCategoriesGrid: View {
             .padding(.bottom, 8)
 
             if isExpanded.wrappedValue {
-                AdvancedOptionsBlock(modifiers: modifiers)
-                    .padding(.top, 2)
-                    .transition(.previewSafe(.opacity.combined(with: .move(edge: .top))))
-                    .animation(Preview.isActive ? nil : .easeInOut, value: isExpanded.wrappedValue)
+                AdvancedOptionsBlock(
+                    modifiers: modifiers,
+                    tileCount: count
+                )
+                .padding(.top, 2)
+                .transition(.previewSafe(.opacity.combined(with: .move(edge: .top))))
+                .animation(Preview.isActive ? nil : .easeInOut, value: isExpanded.wrappedValue)
             }
         }
         .padding(10)
@@ -1332,15 +1336,20 @@ private struct WindowCategoriesGrid: View {
     // Advanced Modifiers UI
     private struct AdvancedOptionsBlock: View {
         @Binding var modifiers: [AdvancedModifierItem]
+        @Binding var tileCount: Int
 
-        init(modifiers: Binding<[AdvancedModifierItem]>) {
+        init(modifiers: Binding<[AdvancedModifierItem]>, tileCount: Binding<Int>) {
             self._modifiers = modifiers
+            self._tileCount = tileCount
         }
 
         var body: some View {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach($modifiers) { $item in
-                    ModifierRow(item: $item)
+                    ModifierRow(
+                        item: $item,
+                        maxAllowed: maxAllowed(for: item.id)
+                    )
                 }
 
                 Button {
@@ -1352,6 +1361,11 @@ private struct WindowCategoriesGrid: View {
                 .buttonStyle(.plain)
                 .padding(.top, 6)
             }
+        }
+
+        // New per-modifier cap: each modifier can go up to the full tileCount
+        private func maxAllowed(for itemID: UUID) -> Int {
+            return max(0, tileCount)
         }
 
         private func addCustom() {
@@ -1370,6 +1384,8 @@ private struct WindowCategoriesGrid: View {
 
         private struct ModifierRow: View {
             @Binding var item: AdvancedModifierItem
+            let maxAllowed: Int
+
             @State private var priceText: String = ""
             @State private var multiplierText: String = ""
 
@@ -1392,8 +1408,8 @@ private struct WindowCategoriesGrid: View {
                     }
                     .pickerStyle(.segmented)
 
-                    // Quantity chooser (between toggle and value input)
-                    QuantityControlsRow(quantity: $item.quantity)
+                    // Quantity chooser with max constraint
+                    QuantityControlsRow(quantity: $item.quantity, maxAllowed: maxAllowed)
 
                     // Input field based on mode
                     HStack {
@@ -1406,11 +1422,23 @@ private struct WindowCategoriesGrid: View {
                     }
                 }
                 .onAppear {
+                    // Clamp to max on appear (in case tile count decreased)
+                    if item.quantity > maxAllowed {
+                        item.quantity = maxAllowed
+                    }
                     if priceText.isEmpty {
                         priceText = Self.currencyString(from: item.priceValue)
                     }
                     if multiplierText.isEmpty {
                         multiplierText = Self.multiplierString(from: item.multiplierValue)
+                    }
+                }
+                .onChange(of: maxAllowed) { _, newMax in
+                    if item.quantity > newMax {
+                        item.quantity = newMax
+                    }
+                    if item.quantity < 0 {
+                        item.quantity = 0
                     }
                 }
                 .onChange(of: item.priceValue) { _, newVal in
@@ -1435,9 +1463,11 @@ private struct WindowCategoriesGrid: View {
             // MARK: - Localized quantity controls (match tile styling)
             private struct QuantityControlsRow: View {
                 @Binding var quantity: Int
+                let maxAllowed: Int
 
-                init(quantity: Binding<Int>) {
+                init(quantity: Binding<Int>, maxAllowed: Int) {
                     _quantity = quantity
+                    self.maxAllowed = maxAllowed
                 }
 
                 var body: some View {
@@ -1452,26 +1482,32 @@ private struct WindowCategoriesGrid: View {
                                 .frame(width: 44, height: 36)
                                 .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
                         }
+                        .disabled(quantity == 0)
 
-                        EditableCountField(count: $quantity)
+                        EditableCountField(count: $quantity, maxAllowed: maxAllowed)
                             .frame(width: 60)
 
                         Button {
-                            quantity += 1
+                            if quantity < maxAllowed {
+                                quantity += 1
+                            }
                         } label: {
                             Image(systemName: "plus")
                                 .font(.system(size: 18, weight: .semibold))
                                 .frame(width: 44, height: 36)
                                 .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
                         }
+                        .disabled(quantity >= maxAllowed)
                     }
                     .padding(.top, 2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                // Local editable numeric field (same behavior as tiles)
+                // Local editable numeric field with max constraint
                 private struct EditableCountField: View {
                     @Binding var count: Int
+                    let maxAllowed: Int
+
                     @State private var text: String = ""
                     @FocusState private var isFocused: Bool
 
@@ -1485,7 +1521,7 @@ private struct WindowCategoriesGrid: View {
                                 let digits = newValue.filter { $0.isNumber }
                                 text = digits
                                 if let val = Int(digits) {
-                                    count = max(0, val)
+                                    count = min(max(0, val), maxAllowed)
                                 } else if digits.isEmpty {
                                     count = 0
                                 }
@@ -1506,9 +1542,13 @@ private struct WindowCategoriesGrid: View {
                             text = String(count)
                         }
                         .onChange(of: count) { _, newValue in
+                            let clamped = min(max(0, newValue), maxAllowed)
+                            if clamped != count {
+                                count = clamped
+                            }
                             let current = Int(text) ?? 0
-                            if current != newValue {
-                                text = String(newValue)
+                            if current != clamped {
+                                text = String(clamped)
                             }
                         }
                         .accessibilityLabel("Quantity")
@@ -1578,7 +1618,7 @@ private struct WindowCategoriesGrid: View {
                     result = "x" + result
                 }
                 if result == "x" || result == "x." {
-                    result = "x1"
+                    return "x1"
                 }
                 return result
             }
@@ -1787,7 +1827,7 @@ private struct WindowCategoriesGrid: View {
 
             if !result.hasPrefix("$") {
                 result = "$" + result
-                       }
+            }
             if result == "$" || result == "$." {
                 result = "$0"
             }
@@ -1798,41 +1838,31 @@ private struct WindowCategoriesGrid: View {
 
 // MARK: - Shared tile total calculator applying advanced modifiers (file scope)
 
+// New additive model: base + sum(price lines) + sum(multiplier deltas)
 fileprivate func tileTotal(count: Int, basePrice: Double, modifiers: [AdvancedModifierItem]) -> Double {
     guard count > 0, basePrice >= 0 else {
-        // Even with 0 count, price-mode quantities may show intent but total should be 0.
         return 0
     }
 
-    // Separate modifiers
-    let priceMods = modifiers.filter { $0.mode == .price && $0.quantity > 0 }
-    let multMods = modifiers.filter { $0.mode == .multiplier && $0.quantity > 0 }
+    let safeBase = max(0, basePrice)
+    let base = Double(count) * safeBase
 
-    var remaining = count
-    var total: Double = 0
+    // Split map/reduce to avoid parser/typing ambiguity
+    let priceLineValues: [Double] = modifiers
+        .filter { $0.mode == .price && $0.quantity > 0 && $0.priceValue >= 0 }
+        .map { Double(min($0.quantity, count)) * $0.priceValue }
+    let priceAdds: Double = priceLineValues.reduce(0.0, +)
 
-    // 1) Apply price-mode replacements first (each consumes windows and sets a fixed price)
-    for mod in priceMods {
-        if remaining <= 0 { break }
-        let take = min(remaining, mod.quantity)
-        total += Double(take) * max(0, mod.priceValue)
-        remaining -= take
-    }
+    let multiplierLineValues: [Double] = modifiers
+        .filter { $0.mode == .multiplier && $0.quantity > 0 && $0.multiplierValue >= 0 }
+        .map { mod in
+            let qty = Double(min(mod.quantity, count))
+            let delta = max(0, mod.multiplierValue - 1.0) // only add extra above base
+            return qty * safeBase * delta
+        }
+    let multiplierAdds: Double = multiplierLineValues.reduce(0.0, +)
 
-    // 2) Apply multiplier-mode replacements to remaining windows
-    for mod in multMods {
-        if remaining <= 0 { break }
-        let take = min(remaining, mod.quantity)
-        total += Double(take) * max(0, basePrice) * max(0, mod.multiplierValue)
-        remaining -= take
-    }
-
-    // 3) Any leftover windows use base price
-    if remaining > 0 {
-        total += Double(remaining) * max(0, basePrice)
-    }
-
-    return total
+    return base + priceAdds + multiplierAdds
 }
 
 #Preview {
