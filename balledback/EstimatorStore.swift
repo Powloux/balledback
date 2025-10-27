@@ -63,7 +63,11 @@ final class EstimatorStore: ObservableObject {
                     groundUnit: updated.groundUnit,
                     secondUnit: updated.secondUnit,
                     threePlusUnit: updated.threePlusUnit,
-                    basementUnit: updated.basementUnit
+                    basementUnit: updated.basementUnit,
+                    groundModifiers: updated.groundModifiers,
+                    secondModifiers: updated.secondModifiers,
+                    threePlusModifiers: updated.threePlusModifiers,
+                    basementModifiers: updated.basementModifiers
                 )
             }
         case .premium:
@@ -86,7 +90,11 @@ final class EstimatorStore: ObservableObject {
                     groundUnit: updated.groundUnit,
                     secondUnit: updated.secondUnit,
                     threePlusUnit: updated.threePlusUnit,
-                    basementUnit: updated.basementUnit
+                    basementUnit: updated.basementUnit,
+                    groundModifiers: updated.groundModifiers,
+                    secondModifiers: updated.secondModifiers,
+                    threePlusModifiers: updated.threePlusModifiers,
+                    basementModifiers: updated.basementModifiers
                 )
             }
         }

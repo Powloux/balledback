@@ -11,8 +11,28 @@ import Combine
 import UIKit
 import MapKit
 
-// Helper to detect Canvas previews
-private let isPreview: Bool = ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+// MARK: - Preview helpers
+
+enum Preview {
+    static var isActive: Bool {
+        ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+    }
+
+    @discardableResult
+    static func disableAnimations<T>(_ body: () -> T) -> T {
+        if isActive {
+            return withAnimation(nil, body)
+        } else {
+            return body()
+        }
+    }
+}
+
+private extension AnyTransition {
+    static func previewSafe(_ transition: AnyTransition) -> AnyTransition {
+        Preview.isActive ? .identity : transition
+    }
+}
 
 // MARK: - Suggestion model (preview-friendly)
 
@@ -138,6 +158,21 @@ final class OneShotLocationManager: NSObject, ObservableObject, CLLocationManage
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) { }
 }
 
+// MARK: - Modifiers seed
+
+private func baseModifiersSeed() -> [AdvancedModifierItem] {
+    [
+        AdvancedModifierItem(name: "Hard water"),
+        AdvancedModifierItem(name: "Difficult to clean"),
+        AdvancedModifierItem(name: "Construction clean"),
+        AdvancedModifierItem(name: "Paint scrape off"),
+        AdvancedModifierItem(name: "French windows"),
+        AdvancedModifierItem(name: "Large windows"),
+        AdvancedModifierItem(name: "Accessibility"),
+        AdvancedModifierItem(name: "Custom", isCustom: true)
+    ]
+}
+
 // MARK: - Main View
 
 struct EstimatorMainView: View {
@@ -216,6 +251,12 @@ struct EstimatorMainView: View {
     @State private var viewportHeight: CGFloat = 0
     @State private var scrollOffsetY: CGFloat = 0
 
+    // Advanced modifiers per tile
+    @State private var groundModifiers: [AdvancedModifierItem] = baseModifiersSeed()
+    @State private var secondModifiers: [AdvancedModifierItem] = baseModifiersSeed()
+    @State private var threePlusModifiers: [AdvancedModifierItem] = baseModifiersSeed()
+    @State private var basementModifiers: [AdvancedModifierItem] = baseModifiersSeed()
+
     // Enable Save if either job name OR job location OR phone OR any window count has content
     private var hasAnyCounts: Bool {
         groundCount > 0 || secondCount > 0 || threePlusCount > 0 || basementCount > 0
@@ -259,7 +300,7 @@ struct EstimatorMainView: View {
     }
 
     private var nearBottom: Bool {
-        if isPreview { return false }
+        if Preview.isActive { return false }
         guard contentHeight > 0, viewportHeight > 0 else { return false }
         let maxOffset = max(0, contentHeight - viewportHeight)
         return (maxOffset - scrollOffsetY) <= bottomThreshold
@@ -272,7 +313,7 @@ struct EstimatorMainView: View {
         if let injected = suggestionProvider {
             self.suggestionProvider = injected
         } else {
-            self.suggestionProvider = isPreview ? MockSuggestionProvider() : MapKitSuggestionProvider()
+            self.suggestionProvider = Preview.isActive ? MockSuggestionProvider() : MapKitSuggestionProvider()
         }
     }
 
@@ -291,7 +332,7 @@ struct EstimatorMainView: View {
                         showSuggestions = false
                     },
                     onJobLocationChanged: { newValue in
-                        if !isPreview {
+                        if !Preview.isActive {
                             suggestionProvider.query = newValue
                         }
                         showSuggestions = !newValue.isEmpty
@@ -317,7 +358,12 @@ struct EstimatorMainView: View {
                     isThreePlusExpanded: $isThreePlusExpanded,
                     isBasementExpanded: $isBasementExpanded,
                     nearBottom: nearBottom,
-                    barHeight: barHeight
+                    barHeight: barHeight,
+                    // Advanced modifiers bindings
+                    groundModifiers: $groundModifiers,
+                    secondModifiers: $secondModifiers,
+                    threePlusModifiers: $threePlusModifiers,
+                    basementModifiers: $basementModifiers
                 )
                 .onContentHeightChanged { contentHeight = $0 }
             }
@@ -328,12 +374,12 @@ struct EstimatorMainView: View {
                     .frame(height: barHeight)
                     .padding(.horizontal, 12)
                     .padding(.bottom, 8)
-                    .transition(isPreview ? .identity : .move(edge: .bottom).combined(with: .opacity))
+                    .transition(.previewSafe(.move(edge: .bottom).combined(with: .opacity)))
             }
         }
         .background(
             Group {
-                if !isPreview {
+                if !Preview.isActive {
                     GeometryReader { _ in
                         Color.clear
                             .overlay(
@@ -373,6 +419,12 @@ struct EstimatorMainView: View {
                 secondUnit = estimate.secondUnit
                 threePlusUnit = estimate.threePlusUnit
                 basementUnit = estimate.basementUnit
+
+                // Load modifiers if present
+                if let gm = estimate.groundModifiers { groundModifiers = gm }
+                if let sm = estimate.secondModifiers { secondModifiers = sm }
+                if let tm = estimate.threePlusModifiers { threePlusModifiers = tm }
+                if let bm = estimate.basementModifiers { basementModifiers = bm }
             }
 
             // Capture initial values for dirty checking
@@ -394,7 +446,7 @@ struct EstimatorMainView: View {
                 .store(in: &cancellableBag)
 
             // Request user location once to bias results (not in previews)
-            if !isPreview {
+            if !Preview.isActive {
                 locationManager.request()
             }
         }
@@ -462,7 +514,13 @@ struct EstimatorMainView: View {
                     threePlusUnit = .window
                     basementUnit = .window
 
-                    if !isPreview {
+                    // Reset modifiers to base seeds
+                    groundModifiers = baseModifiersSeed()
+                    secondModifiers = baseModifiersSeed()
+                    threePlusModifiers = baseModifiersSeed()
+                    basementModifiers = baseModifiersSeed()
+
+                    if !Preview.isActive {
                         suggestionProvider.query = ""
                     }
                     showSuggestions = false
@@ -525,7 +583,7 @@ struct EstimatorMainView: View {
 
     private func finalizeAndDismiss(save: Bool) {
         showSuggestions = false
-        if !isPreview {
+        if !Preview.isActive {
             suggestionProvider.query = ""
         }
 
@@ -538,6 +596,7 @@ struct EstimatorMainView: View {
         let trimmedName = jobName.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalName = trimmedName.isEmpty ? "Untitled Estimate" : trimmedName
 
+        // Include modifiers for persistence
         let trimmed = Estimate(
             jobName: finalName,
             phoneNumber: phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -553,7 +612,11 @@ struct EstimatorMainView: View {
             groundUnit: groundUnit,
             secondUnit: secondUnit,
             threePlusUnit: threePlusUnit,
-            basementUnit: basementUnit
+            basementUnit: basementUnit,
+            groundModifiers: groundModifiers,
+            secondModifiers: secondModifiers,
+            threePlusModifiers: threePlusModifiers,
+            basementModifiers: basementModifiers
         )
 
         if let existing = existingEstimate {
@@ -690,6 +753,12 @@ private struct ScrollContent: View {
     let nearBottom: Bool
     let barHeight: CGFloat
 
+    // Advanced modifiers per tile
+    @Binding var groundModifiers: [AdvancedModifierItem]
+    @Binding var secondModifiers: [AdvancedModifierItem]
+    @Binding var threePlusModifiers: [AdvancedModifierItem]
+    @Binding var basementModifiers: [AdvancedModifierItem]
+
     // Preference writer
     var onContentHeightChanged: (CGFloat) -> Void = { _ in }
 
@@ -736,7 +805,11 @@ private struct ScrollContent: View {
                     isGroundExpanded: $isGroundExpanded,
                     isSecondExpanded: $isSecondExpanded,
                     isThreePlusExpanded: $isThreePlusExpanded,
-                    isBasementExpanded: $isBasementExpanded
+                    isBasementExpanded: $isBasementExpanded,
+                    groundModifiers: $groundModifiers,
+                    secondModifiers: $secondModifiers,
+                    threePlusModifiers: $threePlusModifiers,
+                    basementModifiers: $basementModifiers
                 )
 
                 if nearBottom {
@@ -761,7 +834,7 @@ private struct ScrollContent: View {
             .padding()
             .background(
                 Group {
-                    if !isPreview {
+                    if !Preview.isActive {
                         GeometryReader { contentGeo in
                             Color.clear
                                 .preference(key: ScrollMetricsPreferenceKey.self, value: ScrollMetrics(
@@ -957,6 +1030,12 @@ private struct WindowCategoriesGrid: View {
     @Binding var isThreePlusExpanded: Bool
     @Binding var isBasementExpanded: Bool
 
+    // Advanced modifiers per tile
+    @Binding var groundModifiers: [AdvancedModifierItem]
+    @Binding var secondModifiers: [AdvancedModifierItem]
+    @Binding var threePlusModifiers: [AdvancedModifierItem]
+    @Binding var basementModifiers: [AdvancedModifierItem]
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Exterior")
@@ -970,7 +1049,8 @@ private struct WindowCategoriesGrid: View {
                     isExpanded: $isGroundExpanded,
                     price: $groundPrice,
                     unit: $groundUnit,
-                    isUnitMenuOpen: $groundUnitMenuOpen
+                    isUnitMenuOpen: $groundUnitMenuOpen,
+                    modifiers: $groundModifiers
                 )
                 .scaleEffect(0.95)
 
@@ -981,7 +1061,8 @@ private struct WindowCategoriesGrid: View {
                     isExpanded: $isSecondExpanded,
                     price: $secondPrice,
                     unit: $secondUnit,
-                    isUnitMenuOpen: $secondUnitMenuOpen
+                    isUnitMenuOpen: $secondUnitMenuOpen,
+                    modifiers: $secondModifiers
                 )
                 .scaleEffect(0.95)
 
@@ -992,7 +1073,8 @@ private struct WindowCategoriesGrid: View {
                     isExpanded: $isThreePlusExpanded,
                     price: $threePlusPrice,
                     unit: $threePlusUnit,
-                    isUnitMenuOpen: $threePlusUnitMenuOpen
+                    isUnitMenuOpen: $threePlusUnitMenuOpen,
+                    modifiers: $threePlusModifiers
                 )
                 .scaleEffect(0.95)
 
@@ -1003,7 +1085,8 @@ private struct WindowCategoriesGrid: View {
                     isExpanded: $isBasementExpanded,
                     price: $basementPrice,
                     unit: $basementUnit,
-                    isUnitMenuOpen: $basementUnitMenuOpen
+                    isUnitMenuOpen: $basementUnitMenuOpen,
+                    modifiers: $basementModifiers
                 )
                 .scaleEffect(0.95)
             }
@@ -1021,10 +1104,11 @@ private struct WindowCategoriesGrid: View {
         isExpanded: Binding<Bool>,
         price: Binding<Double>,
         unit: Binding<PricingUnit>,
-        isUnitMenuOpen: Binding<Bool>
+        isUnitMenuOpen: Binding<Bool>,
+        modifiers: Binding<[AdvancedModifierItem]>
     ) -> some View {
         let collapsedHeight: CGFloat = 300
-        let dropdownTransition: AnyTransition = isPreview ? .identity : .opacity.combined(with: .move(edge: .top))
+        let dropdownTransition: AnyTransition = .previewSafe(.opacity.combined(with: .move(edge: .top)))
 
         VStack(spacing: 8) {
             Text(title)
@@ -1071,7 +1155,7 @@ private struct WindowCategoriesGrid: View {
             }
 
             Button {
-                withAnimation(isPreview ? nil : .easeInOut) {
+                withAnimation(Preview.isActive ? nil : .easeInOut) {
                     isExpanded.wrappedValue.toggle()
                 }
             } label: {
@@ -1091,7 +1175,7 @@ private struct WindowCategoriesGrid: View {
                     Image(systemName: "chevron.down")
                         .font(.subheadline.weight(.semibold))
                         .rotationEffect(chevronRotation)
-                        .animation(isPreview ? nil : .easeInOut(duration: 0.2), value: isExpanded.wrappedValue)
+                        .animation(Preview.isActive ? nil : .easeInOut(duration: 0.2), value: isExpanded.wrappedValue)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 10)
@@ -1107,10 +1191,10 @@ private struct WindowCategoriesGrid: View {
             .padding(.bottom, 8)
 
             if isExpanded.wrappedValue {
-                AdvancedOptionsBlock()
+                AdvancedOptionsBlock(modifiers: modifiers)
                     .padding(.top, 2)
-                    .transition(isPreview ? .identity : .opacity.combined(with: .move(edge: .top)))
-                    .animation(isPreview ? nil : .easeInOut, value: isExpanded.wrappedValue)
+                    .transition(.previewSafe(.opacity.combined(with: .move(edge: .top))))
+                    .animation(Preview.isActive ? nil : .easeInOut, value: isExpanded.wrappedValue)
             }
         }
         .padding(10)
@@ -1130,7 +1214,7 @@ private struct WindowCategoriesGrid: View {
                 .stroke(color.opacity(0.25), lineWidth: 1)
         )
         .contentShape(Rectangle())
-        .animation(isPreview ? nil : .easeInOut(duration: 0.2), value: isUnitMenuOpen.wrappedValue)
+        .animation(Preview.isActive ? nil : .easeInOut(duration: 0.2), value: isUnitMenuOpen.wrappedValue)
     }
 
     // Copied helpers localized to the grid scope
@@ -1228,28 +1312,262 @@ private struct WindowCategoriesGrid: View {
         var body: some View {
             VStack(spacing: 8) {
                 Picker("", selection: $unit) {
-                    Text("Window").tag(PricingUnit.window)
-                    Text("Pane").tag(PricingUnit.pane)
+                    Text("Window").tag(PricingUnit.window as PricingUnit)
+                    Text("Pane").tag(PricingUnit.pane as PricingUnit)
                 }
                 .pickerStyle(.segmented)
             }
         }
     }
 
+    // Advanced Modifiers UI
     private struct AdvancedOptionsBlock: View {
+        @Binding var modifiers: [AdvancedModifierItem]
+
+        init(modifiers: Binding<[AdvancedModifierItem]>) {
+            self._modifiers = modifiers
+        }
+
         var body: some View {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Label("Example toggle", systemImage: "slider.horizontal.3")
-                    Spacer()
-                    Toggle("", isOn: .constant(true))
-                        .labelsHidden()
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach($modifiers) { $item in
+                    ModifierRow(item: $item)
+                }
+
+                Button {
+                    addCustom()
+                } label: {
+                    Label("Add Custom", systemImage: "plus.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 6)
+            }
+        }
+
+        private func addCustom() {
+            // Create a unique default name like "Custom 2", "Custom 3", ...
+            let existingCustoms = modifiers.filter { $0.isCustom }
+            let nextIndex = existingCustoms.count + 1
+            let defaultName = existingCustoms.isEmpty ? "Custom" : "Custom \(nextIndex)"
+
+            // Defer to next runloop tick and disable implicit animation to avoid Canvas thrash.
+            DispatchQueue.main.async {
+                Preview.disableAnimations {
+                    modifiers.append(AdvancedModifierItem(name: defaultName, isCustom: true))
+                }
+            }
+        }
+
+        private struct ModifierRow: View {
+            @Binding var item: AdvancedModifierItem
+            @State private var priceText: String = ""
+            @State private var multiplierText: String = ""
+
+            var body: some View {
+                VStack(alignment: .leading, spacing: 8) {
+                    // Title / name (editable if custom)
+                    if item.isCustom {
+                        TextField("Custom name", text: $item.name)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.subheadline.weight(.semibold))
+                    } else {
+                        Text(item.name)
+                            .font(.subheadline.weight(.semibold))
+                    }
+
+                    // Mode selector
+                    Picker("", selection: $item.mode) {
+                        Text(AdvancedModifierMode.price.title).tag(AdvancedModifierMode.price)
+                        Text(AdvancedModifierMode.multiplier.title).tag(AdvancedModifierMode.multiplier)
+                    }
+                    .pickerStyle(.segmented)
+
+                    // Input field based on mode
+                    HStack {
+                        if item.mode == .price {
+                            PriceInput(value: $item.priceValue, text: $priceText)
+                        } else {
+                            MultiplierInput(value: $item.multiplierValue, text: $multiplierText)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+                .onAppear {
+                    if priceText.isEmpty {
+                        priceText = Self.currencyString(from: item.priceValue)
+                    }
+                    if multiplierText.isEmpty {
+                        multiplierText = Self.multiplierString(from: item.multiplierValue)
+                    }
+                }
+                .onChange(of: item.priceValue) { _, newVal in
+                    let cur = Self.parseCurrency(priceText)
+                    if abs(cur - newVal) > 0.0001 {
+                        priceText = Self.currencyString(from: newVal)
+                    }
+                }
+                .onChange(of: item.multiplierValue) { _, newVal in
+                    let cur = Self.parseMultiplier(multiplierText)
+                    if abs(cur - newVal) > 0.0001 {
+                        multiplierText = Self.multiplierString(from: newVal)
+                    }
                 }
                 .padding(10)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
                         .fill(Color(.tertiarySystemBackground))
                 )
+            }
+
+            // MARK: - Static helpers to allow nested types to call them
+            static func currencyString(from v: Double) -> String {
+                String(format: "$%.2f", v)
+            }
+            static func multiplierString(from v: Double) -> String {
+                if abs(v.rounded() - v) < 0.0001 {
+                    return "x\(Int(v))"
+                }
+                return "x\(v)"
+            }
+            static func parseCurrency(_ s: String) -> Double {
+                Double(s.replacingOccurrences(of: "$", with: "")) ?? 0
+            }
+            static func parseMultiplier(_ s: String) -> Double {
+                Double(s.replacingOccurrences(of: "x", with: "")) ?? 1.0
+            }
+            static func filterCurrency(_ s: String) -> String {
+                var result = ""
+                var hasDot = false
+                var hasDollar = false
+
+                for (i, ch) in s.enumerated() {
+                    if ch == "$" && !hasDollar && i == 0 {
+                        result.append(ch)
+                        hasDollar = true
+                    } else if ch.isNumber {
+                        result.append(ch)
+                    } else if ch == "." && !hasDot {
+                        result.append(ch)
+                        hasDot = true
+                    }
+                }
+
+                if !result.hasPrefix("$") {
+                    result = "$" + result
+                }
+                if result == "$" || result == "$." {
+                    result = "$0"
+                }
+                return result
+            }
+            static func filterMultiplier(_ s: String) -> String {
+                var result = ""
+                var hasDot = false
+                var hasX = false
+
+                for (i, ch) in s.enumerated() {
+                    if (ch == "x" || ch == "X") && !hasX && i == 0 {
+                        result.append("x")
+                        hasX = true
+                    } else if ch.isNumber {
+                        result.append(ch)
+                    } else if ch == "." && !hasDot {
+                        result.append(ch)
+                        hasDot = true
+                    }
+                }
+
+                if !result.hasPrefix("x") {
+                    result = "x" + result
+                }
+                if result == "x" || result == "x." {
+                    result = "x1"
+                }
+                return result
+            }
+
+            // Price input similar to other currency fields
+            private struct PriceInput: View {
+                @Binding var value: Double
+                @Binding var text: String
+                @FocusState private var focused: Bool
+
+                var body: some View {
+                    TextField("$0.00", text: Binding(
+                        get: {
+                            if text.isEmpty { return ModifierRow.currencyString(from: value) }
+                            return text
+                        },
+                        set: { newValue in
+                            let filtered = ModifierRow.filterCurrency(newValue)
+                            text = filtered
+                            let numeric = filtered.replacingOccurrences(of: "$", with: "")
+                            if let v = Double(numeric) {
+                                value = max(0, v)
+                            } else if numeric.isEmpty {
+                                value = 0
+                            }
+                        }
+                    ))
+                    .keyboardType(.decimalPad)
+                    .focused($focused)
+                    .multilineTextAlignment(.leading)
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+                    .onChange(of: focused) { _, f in
+                        if !f {
+                            text = ModifierRow.currencyString(from: value)
+                        }
+                    }
+                    .accessibilityLabel("Modifier price")
+                }
+            }
+
+            private struct MultiplierInput: View {
+                @Binding var value: Double
+                @Binding var text: String
+                @FocusState private var focused: Bool
+
+                var body: some View {
+                    TextField("x1", text: Binding(
+                        get: {
+                            if text.isEmpty { return ModifierRow.multiplierString(from: value) }
+                            return text
+                        },
+                        set: { newValue in
+                            let filtered = ModifierRow.filterMultiplier(newValue)
+                            text = filtered
+                            let numeric = filtered.replacingOccurrences(of: "x", with: "")
+                            if let v = Double(numeric) {
+                                value = max(0, v)
+                            } else if numeric.isEmpty {
+                                value = 1.0
+                            }
+                        }
+                    ))
+                    .keyboardType(.decimalPad)
+                    .focused($focused)
+                    .multilineTextAlignment(.leading)
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+                    .onChange(of: focused) { _, f in
+                        if !f {
+                            text = ModifierRow.multiplierString(from: value)
+                        }
+                    }
+                    .accessibilityLabel("Modifier multiplier")
+                }
             }
         }
     }
@@ -1373,7 +1691,7 @@ private struct WindowCategoriesGrid: View {
 
             if !result.hasPrefix("$") {
                 result = "$" + result
-            }
+                       }
             if result == "$" || result == "$." {
                 result = "$0"
             }

@@ -33,6 +33,12 @@ struct Estimate: Identifiable, Hashable {
     var threePlusUnit: PricingUnit
     var basementUnit: PricingUnit
 
+    // Advanced modifiers (optional to preserve compatibility)
+    var groundModifiers: [AdvancedModifierItem]?
+    var secondModifiers: [AdvancedModifierItem]?
+    var threePlusModifiers: [AdvancedModifierItem]?
+    var basementModifiers: [AdvancedModifierItem]?
+
     init(
         id: UUID = UUID(),
         createdAt: Date = Date(),
@@ -50,7 +56,11 @@ struct Estimate: Identifiable, Hashable {
         groundUnit: PricingUnit = .window,
         secondUnit: PricingUnit = .window,
         threePlusUnit: PricingUnit = .window,
-        basementUnit: PricingUnit = .window
+        basementUnit: PricingUnit = .window,
+        groundModifiers: [AdvancedModifierItem]? = nil,
+        secondModifiers: [AdvancedModifierItem]? = nil,
+        threePlusModifiers: [AdvancedModifierItem]? = nil,
+        basementModifiers: [AdvancedModifierItem]? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -72,5 +82,10 @@ struct Estimate: Identifiable, Hashable {
         self.secondUnit = secondUnit
         self.threePlusUnit = threePlusUnit
         self.basementUnit = basementUnit
+
+        self.groundModifiers = groundModifiers
+        self.secondModifiers = secondModifiers
+        self.threePlusModifiers = threePlusModifiers
+        self.basementModifiers = basementModifiers
     }
 }
