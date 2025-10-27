@@ -246,6 +246,12 @@ struct EstimatorMainView: View {
     @State private var isThreePlusExpanded = false
     @State private var isBasementExpanded = false
 
+    // New: per-tile breakdown toggle
+    @State private var showGroundBreakdown = false
+    @State private var showSecondBreakdown = false
+    @State private var showThreePlusBreakdown = false
+    @State private var showBasementBreakdown = false
+
     // Scroll metrics for floating/locking bar
     @State private var contentHeight: CGFloat = 0
     @State private var viewportHeight: CGFloat = 0
@@ -287,19 +293,30 @@ struct EstimatorMainView: View {
             || basementCount != initialBasementCount
     }
 
-    // MARK: - Grand total
+    // MARK: - Grand total and itemization
 
     private let barHeight: CGFloat = 64
     private let bottomThreshold: CGFloat = 32
 
+    private var baseSubtotal: Double {
+        let groundBase = Double(max(0, groundCount)) * max(0, groundPrice)
+        let secondBase = Double(max(0, secondCount)) * max(0, secondPrice)
+        let threeBase = Double(max(0, threePlusCount)) * max(0, threePlusPrice)
+        let basementBase = Double(max(0, basementCount)) * max(0, basementPrice)
+        return groundBase + secondBase + threeBase + basementBase
+    }
+
     // Updated grand total to include modifiers from each tile
     private var grandTotal: Double {
-        // Break into sub-expressions to keep type-checking fast
         let ground = tileTotal(count: groundCount, basePrice: groundPrice, modifiers: groundModifiers)
         let second = tileTotal(count: secondCount, basePrice: secondPrice, modifiers: secondModifiers)
         let threePlus = tileTotal(count: threePlusCount, basePrice: threePlusPrice, modifiers: threePlusModifiers)
         let basement = tileTotal(count: basementCount, basePrice: basementPrice, modifiers: basementModifiers)
         return ground + second + threePlus + basement
+    }
+
+    private var modifiersSubtotal: Double {
+        max(0, grandTotal - baseSubtotal)
     }
 
     private var nearBottom: Bool {
@@ -360,13 +377,21 @@ struct EstimatorMainView: View {
                     isSecondExpanded: $isSecondExpanded,
                     isThreePlusExpanded: $isThreePlusExpanded,
                     isBasementExpanded: $isBasementExpanded,
+                    // breakdown toggles
+                    showGroundBreakdown: $showGroundBreakdown,
+                    showSecondBreakdown: $showSecondBreakdown,
+                    showThreePlusBreakdown: $showThreePlusBreakdown,
+                    showBasementBreakdown: $showBasementBreakdown,
                     nearBottom: nearBottom,
                     barHeight: barHeight,
                     // Advanced modifiers bindings
                     groundModifiers: $groundModifiers,
                     secondModifiers: $secondModifiers,
                     threePlusModifiers: $threePlusModifiers,
-                    basementModifiers: $basementModifiers
+                    basementModifiers: $basementModifiers,
+                    // Bottom itemization values
+                    baseSubtotal: baseSubtotal,
+                    modifiersSubtotal: modifiersSubtotal
                 )
                 .onContentHeightChanged { contentHeight = $0 }
             }
@@ -718,6 +743,55 @@ private struct ViewportReader<Content: View>: View {
     }
 }
 
+// Bottom itemization (moved above ScrollContent so it's visible there)
+private struct BottomItemizationView: View {
+    let baseSubtotal: Double
+    let modifiersSubtotal: Double
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ItemRowCard(
+                title: "Window Total",
+                amount: baseSubtotal
+            )
+
+            ItemRowCard(
+                title: "Modifiers total",
+                amount: modifiersSubtotal
+            )
+        }
+        .padding(.horizontal, 4) // small breathing room relative to surrounding padding
+    }
+
+    private struct ItemRowCard: View {
+        let title: String
+        let amount: Double
+
+        var body: some View {
+            HStack {
+                Text(title)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(String(format: "$%.2f", amount))
+                    .font(.subheadline.weight(.semibold))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color(.secondarySystemBackground))
+                    .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 3)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color(.separator), lineWidth: 0.5)
+            )
+            .padding(.horizontal, 12)
+        }
+    }
+}
+
 private struct ScrollContent: View {
     // Bindings and state
     @Binding var jobName: String
@@ -754,6 +828,12 @@ private struct ScrollContent: View {
     @Binding var isThreePlusExpanded: Bool
     @Binding var isBasementExpanded: Bool
 
+    // New: per-tile breakdown toggles
+    @Binding var showGroundBreakdown: Bool
+    @Binding var showSecondBreakdown: Bool
+    @Binding var showThreePlusBreakdown: Bool
+    @Binding var showBasementBreakdown: Bool
+
     let nearBottom: Bool
     let barHeight: CGFloat
 
@@ -762,6 +842,10 @@ private struct ScrollContent: View {
     @Binding var secondModifiers: [AdvancedModifierItem]
     @Binding var threePlusModifiers: [AdvancedModifierItem]
     @Binding var basementModifiers: [AdvancedModifierItem]
+
+    // New: bottom itemization values (computed by parent)
+    let baseSubtotal: Double
+    let modifiersSubtotal: Double
 
     // Preference writer
     var onContentHeightChanged: (CGFloat) -> Void = { _ in }
@@ -810,11 +894,23 @@ private struct ScrollContent: View {
                     isSecondExpanded: $isSecondExpanded,
                     isThreePlusExpanded: $isThreePlusExpanded,
                     isBasementExpanded: $isBasementExpanded,
+                    // breakdown toggles
+                    showGroundBreakdown: $showGroundBreakdown,
+                    showSecondBreakdown: $showSecondBreakdown,
+                    showThreePlusBreakdown: $showThreePlusBreakdown,
+                    showBasementBreakdown: $showBasementBreakdown,
                     groundModifiers: $groundModifiers,
                     secondModifiers: $secondModifiers,
                     threePlusModifiers: $threePlusModifiers,
                     basementModifiers: $basementModifiers
                 )
+
+                // Bottom itemization section
+                BottomItemizationView(
+                    baseSubtotal: baseSubtotal,
+                    modifiersSubtotal: modifiersSubtotal
+                )
+                .padding(.top, 8)
 
                 if nearBottom {
                     // Footer version of the Grand Total bar when near bottom (locks in)
@@ -1034,6 +1130,12 @@ private struct WindowCategoriesGrid: View {
     @Binding var isThreePlusExpanded: Bool
     @Binding var isBasementExpanded: Bool
 
+    // New: per-tile breakdown toggles
+    @Binding var showGroundBreakdown: Bool
+    @Binding var showSecondBreakdown: Bool
+    @Binding var showThreePlusBreakdown: Bool
+    @Binding var showBasementBreakdown: Bool
+
     // Advanced modifiers per tile
     @Binding var groundModifiers: [AdvancedModifierItem]
     @Binding var secondModifiers: [AdvancedModifierItem]
@@ -1054,7 +1156,8 @@ private struct WindowCategoriesGrid: View {
                     price: $groundPrice,
                     unit: $groundUnit,
                     isUnitMenuOpen: $groundUnitMenuOpen,
-                    modifiers: $groundModifiers
+                    modifiers: $groundModifiers,
+                    showBreakdown: $showGroundBreakdown
                 )
                 .scaleEffect(0.95)
 
@@ -1066,7 +1169,8 @@ private struct WindowCategoriesGrid: View {
                     price: $secondPrice,
                     unit: $secondUnit,
                     isUnitMenuOpen: $secondUnitMenuOpen,
-                    modifiers: $secondModifiers
+                    modifiers: $secondModifiers,
+                    showBreakdown: $showSecondBreakdown
                 )
                 .scaleEffect(0.95)
 
@@ -1078,7 +1182,8 @@ private struct WindowCategoriesGrid: View {
                     price: $threePlusPrice,
                     unit: $threePlusUnit,
                     isUnitMenuOpen: $threePlusUnitMenuOpen,
-                    modifiers: $threePlusModifiers
+                    modifiers: $threePlusModifiers,
+                    showBreakdown: $showThreePlusBreakdown
                 )
                 .scaleEffect(0.95)
 
@@ -1090,7 +1195,8 @@ private struct WindowCategoriesGrid: View {
                     price: $basementPrice,
                     unit: $basementUnit,
                     isUnitMenuOpen: $basementUnitMenuOpen,
-                    modifiers: $basementModifiers
+                    modifiers: $basementModifiers,
+                    showBreakdown: $showBasementBreakdown
                 )
                 .scaleEffect(0.95)
             }
@@ -1109,10 +1215,18 @@ private struct WindowCategoriesGrid: View {
         price: Binding<Double>,
         unit: Binding<PricingUnit>,
         isUnitMenuOpen: Binding<Bool>,
-        modifiers: Binding<[AdvancedModifierItem]>
+        modifiers: Binding<[AdvancedModifierItem]>,
+        showBreakdown: Binding<Bool>
     ) -> some View {
-        let collapsedHeight: CGFloat = 300
+        let collapsedHeight: CGFloat = 320
         let dropdownTransition: AnyTransition = .previewSafe(.opacity.combined(with: .move(edge: .top)))
+
+        // Precompute totals
+        let total = tileTotal(
+            count: count.wrappedValue,
+            basePrice: price.wrappedValue,
+            modifiers: modifiers.wrappedValue
+        )
 
         VStack(spacing: 8) {
             Text(title)
@@ -1141,13 +1255,6 @@ private struct WindowCategoriesGrid: View {
                         .highPriorityGesture(TapGesture())
                 }
 
-                // New total logic applying advanced modifiers as additive lines
-                let total = tileTotal(
-                    count: count.wrappedValue,
-                    basePrice: price.wrappedValue,
-                    modifiers: modifiers.wrappedValue
-                )
-
                 HStack(spacing: 6) {
                     Text("Current total:")
                         .foregroundStyle(.secondary)
@@ -1157,6 +1264,33 @@ private struct WindowCategoriesGrid: View {
                         .kerning(-0.1)
                 }
                 .padding(.top, 2)
+
+                // Breakdown toggle
+                Button {
+                    withAnimation(Preview.isActive ? nil : .easeInOut) {
+                        showBreakdown.wrappedValue.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(showBreakdown.wrappedValue ? "Hide breakdown" : "Show breakdown")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Image(systemName: "chevron.down")
+                            .rotationEffect(.degrees(showBreakdown.wrappedValue ? 180 : 0))
+                            .animation(Preview.isActive ? nil : .easeInOut(duration: 0.2), value: showBreakdown.wrappedValue)
+                    }
+                    .padding(.vertical, 6)
+                }
+                .buttonStyle(.plain)
+
+                if showBreakdown.wrappedValue {
+                    TileBreakdownView(
+                        count: count.wrappedValue,
+                        basePrice: price.wrappedValue,
+                        modifiers: modifiers.wrappedValue
+                    )
+                    .transition(.previewSafe(.opacity.combined(with: .move(edge: .top))))
+                }
             }
             .padding(.vertical, 4)
 
@@ -1203,7 +1337,8 @@ private struct WindowCategoriesGrid: View {
             if isExpanded.wrappedValue {
                 AdvancedOptionsBlock(
                     modifiers: modifiers,
-                    tileCount: count
+                    tileCount: count,
+                    basePrice: price
                 )
                 .padding(.top, 2)
                 .transition(.previewSafe(.opacity.combined(with: .move(edge: .top))))
@@ -1333,23 +1468,113 @@ private struct WindowCategoriesGrid: View {
         }
     }
 
+    // Per-tile breakdown view
+    private struct TileBreakdownView: View {
+        let count: Int
+        let basePrice: Double
+        let modifiers: [AdvancedModifierItem]
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 6) {
+                let safeBase = max(0, basePrice)
+                let base = Double(max(0, count)) * safeBase
+
+                HStack {
+                    Text("Base:")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(count) × \(currency(safeBase)) = \(currency(base))")
+                }
+                .font(.footnote)
+
+                ForEach(modifiers) { mod in
+                    guard mod.quantity > 0 else { return AnyView(EmptyView()) }
+                    if mod.mode == .price, mod.priceValue >= 0 {
+                        let qty = Double(min(mod.quantity, count))
+                        let add = qty * mod.priceValue
+                        return AnyView(
+                            HStack {
+                                Text("\(mod.name):")
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text("\(Int(qty)) × \(currency(mod.priceValue)) = \(currency(add))")
+                            }
+                            .font(.footnote)
+                        )
+                    } else if mod.mode == .multiplier, mod.multiplierValue >= 0 {
+                        let qty = Double(min(mod.quantity, count))
+                        let delta = max(0, mod.multiplierValue - 1.0)
+                        let add = qty * safeBase * delta
+                        return AnyView(
+                            HStack {
+                                Text("\(mod.name):")
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text("\(Int(qty)) × \(currency(safeBase)) × (x\(trim(mult: mod.multiplierValue)) − 1) = \(currency(add))")
+                            }
+                            .font(.footnote)
+                        )
+                    } else {
+                        return AnyView(EmptyView())
+                    }
+                }
+
+                let total = tileTotal(count: count, basePrice: basePrice, modifiers: modifiers)
+                Divider().padding(.vertical, 4)
+                HStack {
+                    Text("Subtotal:")
+                        .font(.footnote.weight(.semibold))
+                    Spacer()
+                    Text(currency(total))
+                        .font(.footnote.weight(.semibold))
+                }
+            }
+            .padding(8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.tertiarySystemBackground))
+            )
+        }
+
+        private func currency(_ v: Double) -> String {
+            String(format: "$%.2f", v)
+        }
+        private func trim(mult v: Double) -> String {
+            if abs(v.rounded() - v) < 0.0001 {
+                return "\(Int(v))"
+            }
+            return String(v)
+        }
+    }
+
     // Advanced Modifiers UI
     private struct AdvancedOptionsBlock: View {
         @Binding var modifiers: [AdvancedModifierItem]
         @Binding var tileCount: Int
+        @Binding var basePrice: Double
 
-        init(modifiers: Binding<[AdvancedModifierItem]>, tileCount: Binding<Int>) {
+        init(modifiers: Binding<[AdvancedModifierItem]>, tileCount: Binding<Int>, basePrice: Binding<Double>) {
             self._modifiers = modifiers
             self._tileCount = tileCount
+            self._basePrice = basePrice
         }
 
         var body: some View {
             VStack(alignment: .leading, spacing: 10) {
-                ForEach($modifiers) { $item in
-                    ModifierRow(
-                        item: $item,
-                        maxAllowed: maxAllowed(for: item.id)
-                    )
+                // Optional visual ordering: active first
+                let sorted = modifiers.sorted { lhs, rhs in
+                    (lhs.quantity > 0 ? 0 : 1, lhs.name) < (rhs.quantity > 0 ? 0 : 1, rhs.name)
+                }
+
+                ForEach(sorted) { item in
+                    if let idx = modifiers.firstIndex(where: { $0.id == item.id }) {
+                        ModifierRow(
+                            item: $modifiers[idx],
+                            maxAllowed: maxAllowed(for: item.id),
+                            tileCount: $tileCount,
+                            basePrice: $basePrice
+                        )
+                    }
                 }
 
                 Button {
@@ -1386,6 +1611,9 @@ private struct WindowCategoriesGrid: View {
             @Binding var item: AdvancedModifierItem
             let maxAllowed: Int
 
+            @Binding var tileCount: Int
+            @Binding var basePrice: Double
+
             @State private var priceText: String = ""
             @State private var multiplierText: String = ""
 
@@ -1401,24 +1629,60 @@ private struct WindowCategoriesGrid: View {
                             .font(.subheadline.weight(.semibold))
                     }
 
-                    // Mode selector
+                    // Mode selector (keep enum but adjust visible labels)
                     Picker("", selection: $item.mode) {
-                        Text(AdvancedModifierMode.price.title).tag(AdvancedModifierMode.price)
-                        Text(AdvancedModifierMode.multiplier.title).tag(AdvancedModifierMode.multiplier)
+                        Text("Add $").tag(AdvancedModifierMode.price)
+                        Text("Multiply").tag(AdvancedModifierMode.multiplier)
                     }
                     .pickerStyle(.segmented)
 
                     // Quantity chooser with max constraint
                     QuantityControlsRow(quantity: $item.quantity, maxAllowed: maxAllowed)
 
-                    // Input field based on mode
-                    HStack {
+                    // Input field based on mode with clearer phrasing
+                    VStack(alignment: .leading, spacing: 4) {
                         if item.mode == .price {
-                            PriceInput(value: $item.priceValue, text: $priceText)
+                            HStack(spacing: 6) {
+                                Text("Add")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                PriceInput(value: $item.priceValue, text: $priceText)
+                                Text("each")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                Spacer(minLength: 0)
+                            }
                         } else {
-                            MultiplierInput(value: $item.multiplierValue, text: $multiplierText)
+                            HStack(spacing: 6) {
+                                Text("Multiply by")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                MultiplierInput(value: $item.multiplierValue, text: $multiplierText)
+                                Text("each")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                Spacer(minLength: 0)
+                            }
+
+                            // Helper delta percent
+                            let deltaPct = max(0, item.multiplierValue - 1.0) * 100.0
+                            Text(String(format: "Adds +%.0f%% of base per window", deltaPct))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
                         }
-                        Spacer(minLength: 0)
+                    }
+
+                    // Live contribution preview
+                    if item.quantity > 0 {
+                        let qty = Double(min(item.quantity, tileCount))
+                        if item.mode == .price {
+                            let add = qty * max(0, item.priceValue)
+                            ContributionLine(label: "Adds", amount: add)
+                        } else {
+                            let delta = max(0, item.multiplierValue - 1.0)
+                            let add = qty * max(0, basePrice) * delta
+                            ContributionLine(label: "Adds", amount: add)
+                        }
                     }
                 }
                 .onAppear {
@@ -1458,6 +1722,22 @@ private struct WindowCategoriesGrid: View {
                     RoundedRectangle(cornerRadius: 10)
                         .fill(Color(.tertiarySystemBackground))
                 )
+            }
+
+            private struct ContributionLine: View {
+                let label: String
+                let amount: Double
+
+                var body: some View {
+                    HStack {
+                        Text(label)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(String(format: "$%.2f", amount))
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .font(.footnote)
+                }
             }
 
             // MARK: - Localized quantity controls (match tile styling)
@@ -1661,7 +1941,7 @@ private struct WindowCategoriesGrid: View {
                             text = ModifierRow.currencyString(from: value)
                         }
                     }
-                    .accessibilityLabel("Modifier price")
+                    .accessibilityLabel("Modifier add price per window")
                 }
             }
 
@@ -1702,7 +1982,7 @@ private struct WindowCategoriesGrid: View {
                             text = ModifierRow.multiplierString(from: value)
                         }
                     }
-                    .accessibilityLabel("Modifier multiplier")
+                    .accessibilityLabel("Modifier multiplier per window")
                 }
             }
         }
