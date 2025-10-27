@@ -405,6 +405,8 @@ struct EstimatorMainView: View {
                     .transition(.previewSafe(.move(edge: .bottom).combined(with: .opacity)))
             }
         }
+        // Prevent keyboard safe-area adjustments from nudging the scroll when focusing fields
+        .ignoresSafeArea(.keyboard)
         .background(
             Group {
                 if !Preview.isActive {
@@ -725,6 +727,24 @@ private struct GrandTotalBar: View {
     }
 }
 
+// MARK: - Freeze scroll utility
+
+private struct FreezeScroll {
+    static func perform(in coordinateSpace: String, isFrozen: Binding<Bool>, _ changes: @escaping () -> Void) {
+        // Disable scrolling and perform changes next runloop to allow ScrollView to compute current offset.
+        isFrozen.wrappedValue = true
+        DispatchQueue.main.async {
+            withAnimation(nil) {
+                changes()
+            }
+            // Re-enable scrolling on the next tick after layout settles.
+            DispatchQueue.main.async {
+                isFrozen.wrappedValue = false
+            }
+        }
+    }
+}
+
 // MARK: - Extracted helpers to simplify body
 
 private struct ViewportReader<Content: View>: View {
@@ -793,7 +813,6 @@ private struct BottomItemizationView: View {
                             .font(.footnote.weight(.semibold))
                     }
                 }
-                .transition(.previewSafe(.opacity.combined(with: .move(edge: .top))))
             }
 
             ItemRowCard(
@@ -818,10 +837,12 @@ private struct BottomItemizationView: View {
                             .font(.footnote.weight(.semibold))
                     }
                 }
-                .transition(.previewSafe(.opacity.combined(with: .move(edge: .top))))
             }
         }
         .padding(.horizontal, 4)
+        .transaction { txn in
+            txn.disablesAnimations = true
+        }
     }
 
     private func currency(_ v: Double) -> String {
@@ -925,7 +946,8 @@ private struct BottomItemizationView: View {
                 }
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    withAnimation(Preview.isActive ? nil : .easeInOut) {
+                    // Do not animate layout height
+                    withAnimation(nil) {
                         isExpanded.toggle()
                     }
                 }
@@ -948,6 +970,9 @@ private struct BottomItemizationView: View {
                     .stroke(Color(.separator), lineWidth: 0.5)
             )
             .padding(.horizontal, 12)
+            .transaction { txn in
+                txn.disablesAnimations = true
+            }
         }
     }
 }
@@ -1009,6 +1034,9 @@ private struct ScrollContent: View {
 
     // Preference writer
     var onContentHeightChanged: (CGFloat) -> Void = { _ in }
+
+    // Freeze flag
+    @State private var isScrollFrozen = false
 
     private var columns: [GridItem] {
         [
@@ -1119,11 +1147,17 @@ private struct ScrollContent: View {
                 }
             )
         }
+        // Allow interactive drag to dismiss keyboard, reducing focus-induced scroll adjustments
+        .scrollDismissesKeyboard(.interactively)
+        .scrollDisabled(isScrollFrozen)
         .coordinateSpace(name: "ScrollArea")
         .onPreferenceChange(ScrollMetricsPreferenceKey.self) { metrics in
             if let ch = metrics.contentHeight {
                 onContentHeightChanged(ch)
             }
+        }
+        .transaction { txn in
+            txn.disablesAnimations = true
         }
     }
 
@@ -1391,7 +1425,6 @@ private struct WindowCategoriesGrid: View {
         showBreakdown: Binding<Bool>
     ) -> some View {
         let collapsedHeight: CGFloat = 320
-        let dropdownTransition: AnyTransition = .previewSafe(.opacity.combined(with: .move(edge: .top)))
 
         // Precompute totals
         let total = tileTotal(
@@ -1423,8 +1456,6 @@ private struct WindowCategoriesGrid: View {
                             RoundedRectangle(cornerRadius: 10)
                                 .stroke(Color(.separator), lineWidth: 0.5)
                         )
-                        .transition(dropdownTransition)
-                        .highPriorityGesture(TapGesture())
                 }
 
                 HStack(spacing: 6) {
@@ -1439,7 +1470,7 @@ private struct WindowCategoriesGrid: View {
 
                 // Breakdown toggle
                 Button {
-                    withAnimation(Preview.isActive ? nil : .easeInOut) {
+                    FreezeScroll.perform(in: "ScrollArea", isFrozen: .constant(false)) {
                         showBreakdown.wrappedValue.toggle()
                     }
                 } label: {
@@ -1461,7 +1492,6 @@ private struct WindowCategoriesGrid: View {
                         basePrice: price.wrappedValue,
                         modifiers: modifiers.wrappedValue
                     )
-                    .transition(.previewSafe(.opacity.combined(with: .move(edge: .top))))
                 }
             }
             .padding(.vertical, 4)
@@ -1471,7 +1501,7 @@ private struct WindowCategoriesGrid: View {
             }
 
             Button {
-                withAnimation(Preview.isActive ? nil : .easeInOut) {
+                FreezeScroll.perform(in: "ScrollArea", isFrozen: .constant(false)) {
                     isExpanded.wrappedValue.toggle()
                 }
             } label: {
@@ -1513,15 +1543,13 @@ private struct WindowCategoriesGrid: View {
                     basePrice: price
                 )
                 .padding(.top, 2)
-                .transition(.previewSafe(.opacity.combined(with: .move(edge: .top))))
-                .animation(Preview.isActive ? nil : .easeInOut, value: isExpanded.wrappedValue)
             }
         }
         .padding(10)
         .frame(
             maxWidth: .infinity,
             minHeight: collapsedHeight,
-            maxHeight: (isExpanded.wrappedValue || isUnitMenuOpen.wrappedValue) ? .infinity : collapsedHeight,
+            maxHeight: (isExpanded.wrappedValue || isUnitMenuOpen.wrappedValue) ? nil : collapsedHeight,
             alignment: .topLeading
         )
         .background(
@@ -1534,7 +1562,10 @@ private struct WindowCategoriesGrid: View {
                 .stroke(color.opacity(0.25), lineWidth: 1)
         )
         .contentShape(Rectangle())
-        .animation(Preview.isActive ? nil : .easeInOut(duration: 0.2), value: isUnitMenuOpen.wrappedValue)
+        // Ensure no implicit animation on height changes for this tile
+        .transaction { txn in
+            txn.disablesAnimations = true
+        }
     }
 
     // Copied helpers localized to the grid scope
@@ -1588,7 +1619,8 @@ private struct WindowCategoriesGrid: View {
         var body: some View {
             HStack(alignment: .center, spacing: 8) {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    // Freeze scroll while toggling the unit menu
+                    FreezeScroll.perform(in: "ScrollArea", isFrozen: .constant(false)) {
                         isUnitMenuOpen.toggle()
                     }
                 } label: {
@@ -1767,6 +1799,10 @@ private struct WindowCategoriesGrid: View {
                 .buttonStyle(.plain)
                 .padding(.top, 6)
             }
+            // Disable implicit animations in this subtree to avoid scroll nudges on size changes.
+            .transaction { txn in
+                txn.disablesAnimations = true
+            }
             .onChange(of: tileCount) { _, _ in
                 // Clamp any quantities that exceed new tileCount
                 for i in modifiers.indices {
@@ -1824,7 +1860,8 @@ private struct WindowCategoriesGrid: View {
                 VStack(spacing: 0) {
                     // Header (collapsed appearance inside the same bubble)
                     Button {
-                        withAnimation(Preview.isActive ? nil : .easeInOut) {
+                        // Toggle without layout animation
+                        withAnimation(nil) {
                             isExpanded.toggle()
                         }
                     } label: {
@@ -1855,7 +1892,6 @@ private struct WindowCategoriesGrid: View {
 
                     if isExpanded {
                         Divider().padding(.horizontal, 12)
-                            .transition(.opacity)
 
                         // Expanded editor content within same bubble
                         VStack(alignment: .leading, spacing: 10) {
@@ -1924,39 +1960,6 @@ private struct WindowCategoriesGrid: View {
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 12)
-                        .transition(.previewSafe(.opacity.combined(with: .move(edge: .top))))
-                        .onAppear {
-                            // Clamp to max on appear (in case tile count decreased)
-                            if item.quantity > maxAllowed {
-                                item.quantity = maxAllowed
-                            }
-                            if priceText.isEmpty {
-                                priceText = ModifierRow.currencyString(from: item.priceValue)
-                            }
-                            if multiplierText.isEmpty {
-                                multiplierText = ModifierRow.multiplierString(from: item.multiplierValue)
-                            }
-                        }
-                        .onChange(of: maxAllowed) { _, newMax in
-                            if item.quantity > newMax {
-                                item.quantity = newMax
-                            }
-                            if item.quantity < 0 {
-                                item.quantity = 0
-                            }
-                        }
-                        .onChange(of: item.priceValue) { _, newVal in
-                            let cur = ModifierRow.parseCurrency(priceText)
-                            if abs(cur - newVal) > 0.0001 {
-                                priceText = ModifierRow.currencyString(from: newVal)
-                            }
-                        }
-                        .onChange(of: item.multiplierValue) { _, newVal in
-                            let cur = ModifierRow.parseMultiplier(multiplierText)
-                            if abs(cur - newVal) > 0.0001 {
-                                multiplierText = ModifierRow.multiplierString(from: newVal)
-                            }
-                        }
                     }
                 }
                 // Single bubble background that wraps both collapsed and expanded states
@@ -1970,6 +1973,9 @@ private struct WindowCategoriesGrid: View {
                         .stroke(highlight ? Color.blue : Color(.separator), lineWidth: 0.5)
                 )
                 .padding(.vertical, 4)
+                .transaction { txn in
+                    txn.disablesAnimations = true
+                }
             }
 
             private struct ContributionLine: View {
