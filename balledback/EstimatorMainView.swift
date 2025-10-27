@@ -292,11 +292,14 @@ struct EstimatorMainView: View {
     private let barHeight: CGFloat = 64
     private let bottomThreshold: CGFloat = 32
 
+    // Updated grand total to include modifiers from each tile
     private var grandTotal: Double {
-        Double(groundCount) * groundPrice
-        + Double(secondCount) * secondPrice
-        + Double(threePlusCount) * threePlusPrice
-        + Double(basementCount) * basementPrice
+        // Break into sub-expressions to keep type-checking fast
+        let ground = tileTotal(count: groundCount, basePrice: groundPrice, modifiers: groundModifiers)
+        let second = tileTotal(count: secondCount, basePrice: secondPrice, modifiers: secondModifiers)
+        let threePlus = tileTotal(count: threePlusCount, basePrice: threePlusPrice, modifiers: threePlusModifiers)
+        let basement = tileTotal(count: basementCount, basePrice: basementPrice, modifiers: basementModifiers)
+        return ground + second + threePlus + basement
     }
 
     private var nearBottom: Bool {
@@ -814,11 +817,11 @@ private struct ScrollContent: View {
 
                 if nearBottom {
                     // Footer version of the Grand Total bar when near bottom (locks in)
-                    let total =
-                        Double(groundCount) * groundPrice
-                        + Double(secondCount) * secondPrice
-                        + Double(threePlusCount) * threePlusPrice
-                        + Double(basementCount) * basementPrice
+                    let ground = tileTotal(count: groundCount, basePrice: groundPrice, modifiers: groundModifiers)
+                    let second = tileTotal(count: secondCount, basePrice: secondPrice, modifiers: secondModifiers)
+                    let threePlus = tileTotal(count: threePlusCount, basePrice: threePlusPrice, modifiers: threePlusModifiers)
+                    let basement = tileTotal(count: basementCount, basePrice: basementPrice, modifiers: basementModifiers)
+                    let total = ground + second + threePlus + basement
 
                     GrandTotalBar(total: total)
                         .frame(height: barHeight)
@@ -1137,7 +1140,13 @@ private struct WindowCategoriesGrid: View {
                         .highPriorityGesture(TapGesture())
                 }
 
-                let total = Double(count.wrappedValue) * price.wrappedValue
+                // New total logic applying advanced modifiers as per-window replacements
+                let total = tileTotal(
+                    count: count.wrappedValue,
+                    basePrice: price.wrappedValue,
+                    modifiers: modifiers.wrappedValue
+                )
+
                 HStack(spacing: 6) {
                     Text("Current total:")
                         .foregroundStyle(.secondary)
@@ -1383,6 +1392,9 @@ private struct WindowCategoriesGrid: View {
                     }
                     .pickerStyle(.segmented)
 
+                    // Quantity chooser (between toggle and value input)
+                    QuantityControlsRow(quantity: $item.quantity)
+
                     // Input field based on mode
                     HStack {
                         if item.mode == .price {
@@ -1418,6 +1430,90 @@ private struct WindowCategoriesGrid: View {
                     RoundedRectangle(cornerRadius: 10)
                         .fill(Color(.tertiarySystemBackground))
                 )
+            }
+
+            // MARK: - Localized quantity controls (match tile styling)
+            private struct QuantityControlsRow: View {
+                @Binding var quantity: Int
+
+                init(quantity: Binding<Int>) {
+                    _quantity = quantity
+                }
+
+                var body: some View {
+                    HStack(spacing: 12) {
+                        Button {
+                            if quantity > 0 {
+                                quantity -= 1
+                            }
+                        } label: {
+                            Image(systemName: "minus")
+                                .font(.system(size: 18, weight: .semibold))
+                                .frame(width: 44, height: 36)
+                                .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+                        }
+
+                        EditableCountField(count: $quantity)
+                            .frame(width: 60)
+
+                        Button {
+                            quantity += 1
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 18, weight: .semibold))
+                                .frame(width: 44, height: 36)
+                                .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+                        }
+                    }
+                    .padding(.top, 2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                // Local editable numeric field (same behavior as tiles)
+                private struct EditableCountField: View {
+                    @Binding var count: Int
+                    @State private var text: String = ""
+                    @FocusState private var isFocused: Bool
+
+                    var body: some View {
+                        TextField("0", text: Binding(
+                            get: {
+                                if text.isEmpty { return String(count) }
+                                return text
+                            },
+                            set: { newValue in
+                                let digits = newValue.filter { $0.isNumber }
+                                text = digits
+                                if let val = Int(digits) {
+                                    count = max(0, val)
+                                } else if digits.isEmpty {
+                                    count = 0
+                                }
+                            }
+                        ))
+                        .keyboardType(.numberPad)
+                        .focused($isFocused)
+                        .multilineTextAlignment(.center)
+                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                        .frame(minWidth: 50)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                        .onAppear {
+                            text = String(count)
+                        }
+                        .onChange(of: count) { _, newValue in
+                            let current = Int(text) ?? 0
+                            if current != newValue {
+                                text = String(newValue)
+                            }
+                        }
+                        .accessibilityLabel("Quantity")
+                    }
+                }
             }
 
             // MARK: - Static helpers to allow nested types to call them
@@ -1698,6 +1794,45 @@ private struct WindowCategoriesGrid: View {
             return result
         }
     }
+}
+
+// MARK: - Shared tile total calculator applying advanced modifiers (file scope)
+
+fileprivate func tileTotal(count: Int, basePrice: Double, modifiers: [AdvancedModifierItem]) -> Double {
+    guard count > 0, basePrice >= 0 else {
+        // Even with 0 count, price-mode quantities may show intent but total should be 0.
+        return 0
+    }
+
+    // Separate modifiers
+    let priceMods = modifiers.filter { $0.mode == .price && $0.quantity > 0 }
+    let multMods = modifiers.filter { $0.mode == .multiplier && $0.quantity > 0 }
+
+    var remaining = count
+    var total: Double = 0
+
+    // 1) Apply price-mode replacements first (each consumes windows and sets a fixed price)
+    for mod in priceMods {
+        if remaining <= 0 { break }
+        let take = min(remaining, mod.quantity)
+        total += Double(take) * max(0, mod.priceValue)
+        remaining -= take
+    }
+
+    // 2) Apply multiplier-mode replacements to remaining windows
+    for mod in multMods {
+        if remaining <= 0 { break }
+        let take = min(remaining, mod.quantity)
+        total += Double(take) * max(0, basePrice) * max(0, mod.multiplierValue)
+        remaining -= take
+    }
+
+    // 3) Any leftover windows use base price
+    if remaining > 0 {
+        total += Double(remaining) * max(0, basePrice)
+    }
+
+    return total
 }
 
 #Preview {

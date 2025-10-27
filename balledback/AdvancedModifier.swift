@@ -21,6 +21,7 @@ struct AdvancedModifierItem: Identifiable, Hashable, Codable {
     var mode: AdvancedModifierMode
     var priceValue: Double
     var multiplierValue: Double
+    var quantity: Int
 
     init(
         id: UUID = UUID(),
@@ -28,7 +29,8 @@ struct AdvancedModifierItem: Identifiable, Hashable, Codable {
         isCustom: Bool = false,
         mode: AdvancedModifierMode = .price,
         priceValue: Double = 0,
-        multiplierValue: Double = 1.0
+        multiplierValue: Double = 1.0,
+        quantity: Int = 0
     ) {
         self.id = id
         self.name = name
@@ -36,6 +38,7 @@ struct AdvancedModifierItem: Identifiable, Hashable, Codable {
         self.mode = mode
         self.priceValue = priceValue
         self.multiplierValue = multiplierValue
+        self.quantity = quantity
     }
 }
 
@@ -50,3 +53,4 @@ extension AdvancedModifierMode {
         }
     }
 }
+
