@@ -6,12 +6,93 @@
 //
 
 import SwiftUI
-import MapKit
 import CoreLocation
 import Combine
 import UIKit
+import MapKit
 
-// Simple location manager to get a one-time region for biasing search.
+// Helper to detect Canvas previews
+private let isPreview: Bool = ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+
+// MARK: - Suggestion model (preview-friendly)
+
+struct SuggestionItem: Identifiable, Hashable {
+    let id = UUID()
+    let title: String
+    let subtitle: String
+}
+
+protocol SuggestionProviding: AnyObject {
+    var query: String { get set }
+    var resultsPublisher: AnyPublisher<[SuggestionItem], Never> { get }
+    func update(region: MKCoordinateRegion?)
+}
+
+// MARK: - Real MapKit-backed provider (used at runtime)
+
+@MainActor
+final class MapKitSuggestionProvider: NSObject, SuggestionProviding {
+    private let resultsSubject = CurrentValueSubject<[SuggestionItem], Never>([])
+    var resultsPublisher: AnyPublisher<[SuggestionItem], Never> { resultsSubject.eraseToAnyPublisher() }
+
+    private let completer: MKLocalSearchCompleter
+
+    override init() {
+        self.completer = MKLocalSearchCompleter()
+        super.init()
+        completer.delegate = self
+        completer.resultTypes = [.address]
+    }
+
+    func update(region: MKCoordinateRegion?) {
+        if let region {
+            completer.region = region
+        }
+    }
+
+    var query: String = "" {
+        didSet { completer.queryFragment = query }
+    }
+}
+
+extension MapKitSuggestionProvider: MKLocalSearchCompleterDelegate {
+    func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
+        let mapped = completer.results.map { SuggestionItem(title: $0.title, subtitle: $0.subtitle) }
+        resultsSubject.send(mapped)
+    }
+
+    func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
+        resultsSubject.send([])
+    }
+}
+
+// MARK: - Mock provider for Canvas previews (no MapKit use)
+
+@MainActor
+final class MockSuggestionProvider: SuggestionProviding {
+    private let resultsSubject = CurrentValueSubject<[SuggestionItem], Never>([])
+    var resultsPublisher: AnyPublisher<[SuggestionItem], Never> { resultsSubject.eraseToAnyPublisher() }
+
+    func update(region: MKCoordinateRegion?) { /* no-op */ }
+
+    var query: String = "" {
+        didSet {
+            guard !query.isEmpty else {
+                resultsSubject.send([])
+                return
+            }
+            // Simple fake data
+            resultsSubject.send([
+                SuggestionItem(title: "123 Main St", subtitle: "Springfield"),
+                SuggestionItem(title: "456 Oak Ave", subtitle: "Shelbyville"),
+                SuggestionItem(title: "789 Pine Rd", subtitle: "Ogdenville")
+            ])
+        }
+    }
+}
+
+// MARK: - Simple location manager to get a one-time region for biasing search.
+
 final class OneShotLocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var region: MKCoordinateRegion?
     @Published var authorizationStatus: CLAuthorizationStatus = .notDetermined
@@ -57,40 +138,7 @@ final class OneShotLocationManager: NSObject, ObservableObject, CLLocationManage
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) { }
 }
 
-// Wrapper around MKLocalSearchCompleter for SwiftUI binding.
-@MainActor
-final class LocalSearchCompleterModel: NSObject, ObservableObject, MKLocalSearchCompleterDelegate {
-    @Published var query: String = "" {
-        didSet { completer.queryFragment = query }
-    }
-    @Published var results: [MKLocalSearchCompletion] = []
-
-    private let completer: MKLocalSearchCompleter
-
-    init(region: MKCoordinateRegion? = nil) {
-        self.completer = MKLocalSearchCompleter()
-        super.init()
-        completer.delegate = self
-        if let region {
-            completer.region = region
-        }
-        completer.resultTypes = [.address]
-    }
-
-    func update(region: MKCoordinateRegion?) {
-        if let region {
-            completer.region = region
-        }
-    }
-
-    func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
-        results = completer.results
-    }
-
-    func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
-        results = []
-    }
-}
+// MARK: - Main View
 
 struct EstimatorMainView: View {
     // Breadcrumb: where the user came from
@@ -139,9 +187,11 @@ struct EstimatorMainView: View {
     @State private var initialThreePlusCount: Int = 0
     @State private var initialBasementCount: Int = 0
 
-    // Location and search models
+    // Location and suggestions
     @StateObject private var locationManager = OneShotLocationManager()
-    @StateObject private var searchModel = LocalSearchCompleterModel()
+    @State private var suggestions: [SuggestionItem] = []
+    @State private var cancellableBag = Set<AnyCancellable>()
+    private let suggestionProvider: SuggestionProviding
 
     // Control suggestions visibility
     @State private var showSuggestions = false
@@ -149,7 +199,7 @@ struct EstimatorMainView: View {
     // Confirm discard/save draft
     @State private var showDiscardDialog = false
 
-    // New: alert for saving without a name
+    // Alert for saving without a name
     @State private var showUnnamedSaveAlert = false
 
     // Focus for job name field
@@ -196,11 +246,6 @@ struct EstimatorMainView: View {
             || basementCount != initialBasementCount
     }
 
-    // Derived: any unit menu open?
-    private var anyUnitMenuOpen: Bool {
-        groundUnitMenuOpen || secondUnitMenuOpen || threePlusUnitMenuOpen || basementUnitMenuOpen
-    }
-
     // MARK: - Grand total
 
     private let barHeight: CGFloat = 64
@@ -214,210 +259,67 @@ struct EstimatorMainView: View {
     }
 
     private var nearBottom: Bool {
+        if isPreview { return false }
         guard contentHeight > 0, viewportHeight > 0 else { return false }
         let maxOffset = max(0, contentHeight - viewportHeight)
-        // scrollOffsetY goes from 0 (top) to maxOffset (bottom)
         return (maxOffset - scrollOffsetY) <= bottomThreshold
     }
 
-    init(source: EstimatorSource, existingEstimate: Estimate? = nil) {
+    init(source: EstimatorSource, existingEstimate: Estimate? = nil, suggestionProvider: SuggestionProviding? = nil) {
         self.source = source
         self.existingEstimate = existingEstimate
+        // Inject or choose default provider (mock for previews, MapKit for runtime)
+        if let injected = suggestionProvider {
+            self.suggestionProvider = injected
+        } else {
+            self.suggestionProvider = isPreview ? MockSuggestionProvider() : MapKitSuggestionProvider()
+        }
     }
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            // Main content with scroll tracking
-            GeometryReader { outerGeo in
-                let vpHeight = outerGeo.size.height
-                Color.clear
-                    .onAppear { viewportHeight = vpHeight }
-                    .onChange(of: vpHeight) { _, newVal in viewportHeight = newVal }
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        // Job Name input
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Job Name")
-                                .font(.headline)
-
-                            TextField("Enter job name", text: $jobName)
-                                .textInputAutocapitalization(.words)
-                                .submitLabel(.done)
-                                .textFieldStyle(.roundedBorder)
-                                .focused($jobNameFocused)
+            ViewportReader(viewportChanged: { viewportHeight = $0 }) {
+                ScrollContent(
+                    jobName: $jobName,
+                    phoneNumber: $phoneNumber,
+                    jobLocation: $jobLocation,
+                    showSuggestions: $showSuggestions,
+                    suggestions: suggestions,
+                    onSuggestionTapped: { item in
+                        let combined = item.title.isEmpty ? item.subtitle : "\(item.title) \(item.subtitle)"
+                        jobLocation = combined.trimmingCharacters(in: .whitespacesAndNewlines)
+                        showSuggestions = false
+                    },
+                    onJobLocationChanged: { newValue in
+                        if !isPreview {
+                            suggestionProvider.query = newValue
                         }
-
-                        // Phone Number input (digits only)
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Phone Number")
-                                .font(.headline)
-
-                            TextField("Enter phone number", text: $phoneNumber)
-                                .keyboardType(.numberPad)
-                                .textInputAutocapitalization(.never)
-                                .submitLabel(.done)
-                                .textFieldStyle(.roundedBorder)
-                                .onChange(of: phoneNumber) { _, newValue in
-                                    let filtered = newValue.filter { $0.isNumber }
-                                    if filtered != newValue {
-                                        phoneNumber = filtered
-                                    }
-                                }
-                        }
-
-                        // Job Location input with suggestions
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Job Location")
-                                .font(.headline)
-
-                            TextField("Enter job location", text: $jobLocation, onEditingChanged: { isEditing in
-                                showSuggestions = isEditing && !jobLocation.isEmpty
-                            })
-                            .textInputAutocapitalization(.words)
-                            .submitLabel(.done)
-                            .textFieldStyle(.roundedBorder)
-                            .onChange(of: jobLocation) { _, newValue in
-                                searchModel.query = newValue
-                                showSuggestions = !newValue.isEmpty
-                            }
-
-                            if showSuggestions && !searchModel.results.isEmpty {
-                                VStack(spacing: 0) {
-                                    ForEach(searchModel.results, id: \.self) { item in
-                                        Button {
-                                            let combined = item.title.isEmpty ? item.subtitle : "\(item.title) \(item.subtitle)"
-                                            jobLocation = combined.trimmingCharacters(in: .whitespacesAndNewlines)
-                                            showSuggestions = false
-                                        } label: {
-                                            HStack(alignment: .top, spacing: 8) {
-                                                Image(systemName: "mappin.and.ellipse")
-                                                    .foregroundStyle(.secondary)
-                                                VStack(alignment: .leading, spacing: 2) {
-                                                    Text(item.title)
-                                                        .foregroundStyle(.primary)
-                                                    if !item.subtitle.isEmpty {
-                                                        Text(item.subtitle)
-                                                            .foregroundStyle(.secondary)
-                                                            .font(.subheadline)
-                                                    }
-                                                }
-                                                Spacer()
-                                            }
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 10)
-                                        }
-                                        .buttonStyle(.plain)
-
-                                        if item != searchModel.results.last {
-                                            Divider()
-                                        }
-                                    }
-                                }
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .fill(Color(.systemBackground))
-                                        .shadow(color: .black.opacity(0.1), radius: 6, x: 0, y: 3)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .stroke(Color(.separator), lineWidth: 0.5)
-                                )
-                            }
-                        }
-
-                        // Window Categories (fixed 2x2 grid of tiles)
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Exterior")
-                                .font(.headline)
-
-                            let columns = [
-                                GridItem(.flexible(), spacing: 35, alignment: .top),
-                                GridItem(.flexible(), spacing: 12, alignment: .top)
-                            ]
-
-                            LazyVGrid(columns: columns, alignment: .center, spacing: 5) {
-                                categoryTile(
-                                    title: "Ground Level",
-                                    count: $groundCount,
-                                    color: .blue,
-                                    isExpanded: $isGroundExpanded,
-                                    price: $groundPrice,
-                                    unit: $groundUnit,
-                                    isUnitMenuOpen: $groundUnitMenuOpen
-                                )
-                                .scaleEffect(0.95)
-
-                                categoryTile(
-                                    title: "Second Story",
-                                    count: $secondCount,
-                                    color: .teal,
-                                    isExpanded: $isSecondExpanded,
-                                    price: $secondPrice,
-                                    unit: $secondUnit,
-                                    isUnitMenuOpen: $secondUnitMenuOpen
-                                )
-                                .scaleEffect(0.95)
-
-                                categoryTile(
-                                    title: "3+ Story",
-                                    count: $threePlusCount,
-                                    color: .purple,
-                                    isExpanded: $isThreePlusExpanded,
-                                    price: $threePlusPrice,
-                                    unit: $threePlusUnit,
-                                    isUnitMenuOpen: $threePlusUnitMenuOpen
-                                )
-                                .scaleEffect(0.95)
-
-                                categoryTile(
-                                    title: "Basement",
-                                    count: $basementCount,
-                                    color: .indigo,
-                                    isExpanded: $isBasementExpanded,
-                                    price: $basementPrice,
-                                    unit: $basementUnit,
-                                    isUnitMenuOpen: $basementUnitMenuOpen
-                                )
-                                .scaleEffect(0.95)
-                            }
-                            .padding(.top, 2)
-                            .padding(.horizontal, 7)
-                        }
-
-                        // Footer version of the Grand Total bar when near bottom (locks in)
-                        if nearBottom {
-                            GrandTotalBar(total: grandTotal)
-                                .frame(height: barHeight)
-                                .padding(.top, 8)
-                        }
-
-                        // Spacer to avoid overlay overlap
-                        // Keep only when floating (not near bottom) so last content is reachable
-                        if !nearBottom {
-                            Spacer().frame(height: barHeight + 12)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-                    .background(
-                        GeometryReader { contentGeo in
-                            Color.clear
-                                .preference(key: ScrollMetricsPreferenceKey.self, value: ScrollMetrics(
-                                    contentHeight: contentGeo.size.height
-                                ))
-                        }
-                    )
-                }
-                // Named coordinate space so ScrollOffsetReader can measure offset
-                .coordinateSpace(name: "ScrollArea")
-                .background(
-                    GeometryReader { scrollGeo in
-                        Color.clear
-                            .onAppear { viewportHeight = scrollGeo.size.height }
-                            .onChange(of: scrollGeo.size.height) { _, newVal in viewportHeight = newVal }
-                    }
+                        showSuggestions = !newValue.isEmpty
+                    },
+                    groundCount: $groundCount,
+                    secondCount: $secondCount,
+                    threePlusCount: $threePlusCount,
+                    basementCount: $basementCount,
+                    groundPrice: $groundPrice,
+                    secondPrice: $secondPrice,
+                    threePlusPrice: $threePlusPrice,
+                    basementPrice: $basementPrice,
+                    groundUnit: $groundUnit,
+                    secondUnit: $secondUnit,
+                    threePlusUnit: $threePlusUnit,
+                    basementUnit: $basementUnit,
+                    groundUnitMenuOpen: $groundUnitMenuOpen,
+                    secondUnitMenuOpen: $secondUnitMenuOpen,
+                    threePlusUnitMenuOpen: $threePlusUnitMenuOpen,
+                    basementUnitMenuOpen: $basementUnitMenuOpen,
+                    isGroundExpanded: $isGroundExpanded,
+                    isSecondExpanded: $isSecondExpanded,
+                    isThreePlusExpanded: $isThreePlusExpanded,
+                    isBasementExpanded: $isBasementExpanded,
+                    nearBottom: nearBottom,
+                    barHeight: barHeight
                 )
+                .onContentHeightChanged { contentHeight = $0 }
             }
 
             // Floating overlay version when not near bottom
@@ -426,27 +328,23 @@ struct EstimatorMainView: View {
                     .frame(height: barHeight)
                     .padding(.horizontal, 12)
                     .padding(.bottom, 8)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .onPreferenceChange(ScrollMetricsPreferenceKey.self) { metrics in
-            // Update content height if provided
-            if let ch = metrics.contentHeight {
-                contentHeight = ch
+                    .transition(isPreview ? .identity : .move(edge: .bottom).combined(with: .opacity))
             }
         }
         .background(
-            GeometryReader { geo in
-                // Track scroll offset by comparing the minY of the content within the outer space
-                Color.clear
-                    .onAppear {
-                        viewportHeight = geo.size.height
+            Group {
+                if !isPreview {
+                    GeometryReader { _ in
+                        Color.clear
+                            .overlay(
+                                ScrollOffsetReader(offsetChanged: { offset in
+                                    scrollOffsetY = offset
+                                })
+                            )
                     }
-                    .overlay(
-                        ScrollOffsetReader(offsetChanged: { offset in
-                            scrollOffsetY = offset
-                        })
-                    )
+                } else {
+                    Color.clear
+                }
             }
         )
 
@@ -487,11 +385,21 @@ struct EstimatorMainView: View {
             initialThreePlusCount = threePlusCount
             initialBasementCount = basementCount
 
-            // Request user location once to bias results
-            locationManager.request()
+            // Subscribe to suggestions
+            suggestionProvider.resultsPublisher
+                .receive(on: DispatchQueue.main)
+                .sink { items in
+                    self.suggestions = items
+                }
+                .store(in: &cancellableBag)
+
+            // Request user location once to bias results (not in previews)
+            if !isPreview {
+                locationManager.request()
+            }
         }
         .onReceive(locationManager.$region.compactMap { $0 }) { newRegion in
-            searchModel.update(region: newRegion)
+            suggestionProvider.update(region: newRegion)
         }
 
         .toolbar {
@@ -554,7 +462,9 @@ struct EstimatorMainView: View {
                     threePlusUnit = .window
                     basementUnit = .window
 
-                    searchModel.query = ""
+                    if !isPreview {
+                        suggestionProvider.query = ""
+                    }
                     showSuggestions = false
                 } label: {
                     Text("Clear")
@@ -611,396 +521,13 @@ struct EstimatorMainView: View {
         }
     }
 
-    // MARK: - Tile Builder
-
-    @ViewBuilder
-    private func categoryTile(
-        title: String,
-        count: Binding<Int>,
-        color: Color,
-        isExpanded: Binding<Bool>,
-        price: Binding<Double>,
-        unit: Binding<PricingUnit>,
-        isUnitMenuOpen: Binding<Bool>
-    ) -> some View {
-        let collapsedHeight: CGFloat = 300
-        // FIX: use .opacity (static), not .opacity()
-        let dropdownTransition: AnyTransition = .opacity.combined(with: .move(edge: .top))
-
-        VStack(spacing: 8) {
-            Text(title)
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .center)
-            .multilineTextAlignment(.center)
-
-            // Controls row: − [count] +
-            CountControlsRow(count: count)
-
-            // Price row: "Price Per…" button with dropdown + price field
-            VStack(alignment: .leading, spacing: 6) {
-                PricePerRow(isUnitMenuOpen: isUnitMenuOpen, price: price)
-
-                if isUnitMenuOpen.wrappedValue {
-                    UnitDropdownMenu(unit: unit)
-                        .padding(6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(Color(.systemBackground))
-                                .shadow(color: .black.opacity(0.1), radius: 6, x: 0, y: 3)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(Color(.separator), lineWidth: 0.5)
-                        )
-                        .transition(dropdownTransition)
-                        // Keep taps inside the dropdown local
-                        .highPriorityGesture(TapGesture())
-                }
-
-                // Current total row (cleaned and emphasized) with tighter gap
-                let total = Double(count.wrappedValue) * price.wrappedValue
-                HStack(spacing: 6) {
-                    Text("Current total:")
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 2) // tightened gap
-                    Text(String(format: "$%.2f", total))
-                        .font(.headline.weight(.semibold)) // match tile title emphasis
-                        .kerning(-0.1) // subtle optical tightening
-                }
-                .padding(.top, 2)
-            }
-            .padding(.vertical, 4)
-
-            // Spacer to keep the Advanced button near the bottom whenever collapsed
-            if !isExpanded.wrappedValue {
-                Spacer(minLength: 8)
-            }
-
-            // Bottom-aligned Advanced Modifiers button with small bottom padding
-            Button {
-                withAnimation(.easeInOut) {
-                    isExpanded.wrappedValue.toggle()
-                }
-            } label: {
-                HStack(alignment: .center, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Advanced")
-                        Text("Modifiers")
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(nil)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                    Spacer()
-
-                    let chevronRotation = Angle(degrees: isExpanded.wrappedValue ? 180 : 0)
-                    Image(systemName: "chevron.down")
-                        .font(.subheadline.weight(.semibold))
-                        .rotationEffect(chevronRotation)
-                        .animation(.easeInOut(duration: 0.2), value: isExpanded.wrappedValue)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 10)
-                .padding(.horizontal, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.secondarySystemBackground))
-                )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Advanced Modifiers")
-            .padding(.top, 4)
-            .padding(.bottom, 8) // small bottom padding so it's not flush
-
-            // Expanded advanced content now appears BELOW the button
-            if isExpanded.wrappedValue {
-                AdvancedOptionsBlock()
-                    .padding(.top, 2)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                    .animation(.easeInOut, value: isExpanded.wrappedValue)
-            }
-        }
-        .padding(10)
-        .frame(
-            maxWidth: .infinity,
-            minHeight: collapsedHeight,
-            // Expand if either Advanced is open or the Price Per menu is open.
-            maxHeight: (isExpanded.wrappedValue || isUnitMenuOpen.wrappedValue) ? .infinity : collapsedHeight,
-            alignment: .topLeading
-        )
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(.systemBackground))
-                .shadow(color: .black.opacity(0.07), radius: 6, x: 0, y: 3)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(color.opacity(0.25), lineWidth: 1)
-        )
-        .contentShape(Rectangle())
-        .animation(.easeInOut(duration: 0.2), value: isUnitMenuOpen.wrappedValue)
-    }
-
-    // MARK: - Subviews extracted to reduce type-checking complexity
-
-    private struct CountControlsRow: View {
-        @Binding var count: Int
-
-        init(count: Binding<Int>) {
-            self._count = count
-        }
-
-        var body: some View {
-            HStack(spacing: 12) {
-                Button {
-                    if count > 0 {
-                        count -= 1
-                    }
-                } label: {
-                    Image(systemName: "minus")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 44, height: 36)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
-                }
-
-                EditableCountField(count: $count)
-                    .frame(width: 60)
-
-                Button {
-                    count += 1
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 44, height: 36)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
-                }
-            }
-            .padding(.top, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private struct PricePerRow: View {
-        @Binding var isUnitMenuOpen: Bool
-        @Binding var price: Double
-
-        init(isUnitMenuOpen: Binding<Bool>, price: Binding<Double>) {
-            self._isUnitMenuOpen = isUnitMenuOpen
-            self._price = price
-        }
-
-        var body: some View {
-            HStack(alignment: .center, spacing: 8) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        isUnitMenuOpen.toggle()
-                    }
-                } label: {
-                    VStack(spacing: 2) {
-                        Text("Price Per…")
-                            .font(.subheadline.weight(.semibold))
-                            .multilineTextAlignment(.center)
-                            .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
-                        let chevronRotation = Angle(degrees: isUnitMenuOpen ? 180 : 0)
-                        Image(systemName: "chevron.down")
-                            .font(.subheadline.weight(.semibold))
-                            .rotationEffect(chevronRotation)
-                            .animation(.easeInOut(duration: 0.2), value: isUnitMenuOpen)
-                    }
-                    .frame(minWidth: 0, idealWidth: 140, maxWidth: 160)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(.secondarySystemBackground))
-                    )
-                }
-                .buttonStyle(.plain)
-
-                Spacer(minLength: 6)
-
-                // Widened and centered price bubble
-                PriceField(value: $price)
-                    .frame(minWidth: 85, idealWidth: 100, maxWidth: 110, alignment: .center)
-            }
-        }
-    }
-
-    private struct UnitDropdownMenu: View {
-        @Binding var unit: PricingUnit
-
-        init(unit: Binding<PricingUnit>) {
-            self._unit = unit
-        }
-
-        var body: some View {
-            VStack(spacing: 8) {
-                Picker("", selection: $unit) {
-                    Text("Window").tag(PricingUnit.window)
-                    Text("Pane").tag(PricingUnit.pane)
-                }
-                .pickerStyle(.segmented)
-            }
-        }
-    }
-
-    private struct AdvancedOptionsBlock: View {
-        var body: some View {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Label("Example toggle", systemImage: "slider.horizontal.3")
-                    Spacer()
-                    Toggle("", isOn: .constant(true))
-                        .labelsHidden()
-                }
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color(.tertiarySystemBackground))
-                )
-            }
-        }
-    }
-
-    // Small helper view to edit an Int count with numeric keyboard and validation
-    private struct EditableCountField: View {
-        @Binding var count: Int
-        @State private var text: String = ""
-        @FocusState private var isFocused: Bool
-
-        var body: some View {
-            TextField("0", text: Binding(
-                get: {
-                    if text.isEmpty { return String(count) }
-                    return text
-                },
-                set: { newValue in
-                    let digits = newValue.filter { $0.isNumber }
-                    text = digits
-                    if let val = Int(digits) {
-                        count = max(0, val)
-                    } else if digits.isEmpty {
-                        count = 0
-                    }
-                }
-            ))
-            .keyboardType(.numberPad)
-            .focused($isFocused)
-            .multilineTextAlignment(.center)
-            .font(.system(size: 22, weight: .bold, design: .rounded))
-            .frame(minWidth: 50)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(.secondarySystemBackground))
-            )
-            .onAppear {
-                text = String(count)
-            }
-            .onChange(of: count) { _, newValue in
-                let current = Int(text) ?? 0
-                if current != newValue {
-                    text = String(newValue)
-                }
-            }
-            .accessibilityLabel("Quantity")
-        }
-    }
-
-    // Numeric price field for Double with validation and "$0.00" default
-    private struct PriceField: View {
-        @Binding var value: Double
-        @State private var text: String = ""
-        @FocusState private var isFocused: Bool
-
-        var body: some View {
-            TextField("$0.00", text: Binding(
-                get: {
-                    if text.isEmpty { return currencyString(from: value) }
-                    return text
-                },
-                set: { newValue in
-                    // Allow optional leading "$", digits, and one decimal point.
-                    let filtered = filterCurrency(newValue)
-                    text = filtered
-                    let numeric = filtered.replacingOccurrences(of: "$", with: "")
-                    if let v = Double(numeric) {
-                        value = max(0, v)
-                    } else if numeric.isEmpty {
-                        value = 0
-                    }
-                }
-            ))
-            .keyboardType(.decimalPad)
-            .focused($isFocused)
-            .multilineTextAlignment(.center) // centered inside the bubble
-            .font(.system(size: 18, weight: .semibold, design: .rounded))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(.secondarySystemBackground))
-            )
-            .onAppear {
-                text = currencyString(from: value)
-            }
-            .onChange(of: value) { _, newValue in
-                let currentNumeric = Double(text.replacingOccurrences(of: "$", with: "")) ?? 0
-                if abs(currentNumeric - newValue) > 0.0001 {
-                    text = currencyString(from: newValue)
-                }
-            }
-            .onChange(of: isFocused) { _, focused in
-                // Reformat on focus loss to ensure "$x.xx"
-                if !focused {
-                    text = currencyString(from: value)
-                }
-            }
-            .accessibilityLabel("Price per unit")
-        }
-
-        private func currencyString(from v: Double) -> String {
-            // Always show $ with two decimals
-            return String(format: "$%.2f", v)
-        }
-
-        private func filterCurrency(_ s: String) -> String {
-            var result = ""
-            var hasDot = false
-            var hasDollar = false
-
-            for (i, ch) in s.enumerated() {
-                if ch == "$" && !hasDollar && i == 0 {
-                    result.append(ch)
-                    hasDollar = true
-                } else if ch.isNumber {
-                    result.append(ch)
-                } else if ch == "." && !hasDot {
-                    result.append(ch)
-                    hasDot = true
-                }
-            }
-
-            // Ensure leading "$"
-            if !result.hasPrefix("$") {
-                result = "$" + result
-            }
-            // Avoid lone "$" or "$."
-            if result == "$" || result == "$." {
-                result = "$0"
-            }
-            return result
-        }
-    }
-
     // MARK: - Save helper
 
     private func finalizeAndDismiss(save: Bool) {
         showSuggestions = false
-        searchModel.query = ""
+        if !isPreview {
+            suggestionProvider.query = ""
+        }
 
         guard save else {
             dismiss()
@@ -1106,9 +633,759 @@ private struct GrandTotalBar: View {
     }
 }
 
+// MARK: - Extracted helpers to simplify body
+
+private struct ViewportReader<Content: View>: View {
+    let viewportChanged: (CGFloat) -> Void
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        GeometryReader { outerGeo in
+            let vpHeight: CGFloat = outerGeo.size.height
+            Color.clear
+                .onAppear { viewportChanged(vpHeight) }
+                .onChange(of: vpHeight) { _, newVal in viewportChanged(newVal) }
+
+            content()
+        }
+    }
+}
+
+private struct ScrollContent: View {
+    // Bindings and state
+    @Binding var jobName: String
+    @Binding var phoneNumber: String
+    @Binding var jobLocation: String
+
+    @Binding var showSuggestions: Bool
+    let suggestions: [SuggestionItem]
+    let onSuggestionTapped: (SuggestionItem) -> Void
+    let onJobLocationChanged: (String) -> Void
+
+    @Binding var groundCount: Int
+    @Binding var secondCount: Int
+    @Binding var threePlusCount: Int
+    @Binding var basementCount: Int
+
+    @Binding var groundPrice: Double
+    @Binding var secondPrice: Double
+    @Binding var threePlusPrice: Double
+    @Binding var basementPrice: Double
+
+    @Binding var groundUnit: PricingUnit
+    @Binding var secondUnit: PricingUnit
+    @Binding var threePlusUnit: PricingUnit
+    @Binding var basementUnit: PricingUnit
+
+    @Binding var groundUnitMenuOpen: Bool
+    @Binding var secondUnitMenuOpen: Bool
+    @Binding var threePlusUnitMenuOpen: Bool
+    @Binding var basementUnitMenuOpen: Bool
+
+    @Binding var isGroundExpanded: Bool
+    @Binding var isSecondExpanded: Bool
+    @Binding var isThreePlusExpanded: Bool
+    @Binding var isBasementExpanded: Bool
+
+    let nearBottom: Bool
+    let barHeight: CGFloat
+
+    // Preference writer
+    var onContentHeightChanged: (CGFloat) -> Void = { _ in }
+
+    private var columns: [GridItem] {
+        [
+            GridItem(.flexible(), spacing: 35, alignment: .top),
+            GridItem(.flexible(), spacing: 12, alignment: .top)
+        ]
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                JobNameField(jobName: $jobName)
+
+                PhoneField(phoneNumber: $phoneNumber)
+
+                LocationField(
+                    jobLocation: $jobLocation,
+                    showSuggestions: $showSuggestions,
+                    suggestions: suggestions,
+                    onSuggestionTapped: onSuggestionTapped,
+                    onChange: onJobLocationChanged
+                )
+
+                WindowCategoriesGrid(
+                    columns: columns,
+                    groundCount: $groundCount,
+                    secondCount: $secondCount,
+                    threePlusCount: $threePlusCount,
+                    basementCount: $basementCount,
+                    groundPrice: $groundPrice,
+                    secondPrice: $secondPrice,
+                    threePlusPrice: $threePlusPrice,
+                    basementPrice: $basementPrice,
+                    groundUnit: $groundUnit,
+                    secondUnit: $secondUnit,
+                    threePlusUnit: $threePlusUnit,
+                    basementUnit: $basementUnit,
+                    groundUnitMenuOpen: $groundUnitMenuOpen,
+                    secondUnitMenuOpen: $secondUnitMenuOpen,
+                    threePlusUnitMenuOpen: $threePlusUnitMenuOpen,
+                    basementUnitMenuOpen: $basementUnitMenuOpen,
+                    isGroundExpanded: $isGroundExpanded,
+                    isSecondExpanded: $isSecondExpanded,
+                    isThreePlusExpanded: $isThreePlusExpanded,
+                    isBasementExpanded: $isBasementExpanded
+                )
+
+                if nearBottom {
+                    // Footer version of the Grand Total bar when near bottom (locks in)
+                    let total =
+                        Double(groundCount) * groundPrice
+                        + Double(secondCount) * secondPrice
+                        + Double(threePlusCount) * threePlusPrice
+                        + Double(basementCount) * basementPrice
+
+                    GrandTotalBar(total: total)
+                        .frame(height: barHeight)
+                        .padding(.top, 8)
+                }
+
+                // Spacer to avoid overlay overlap
+                if !nearBottom {
+                    Spacer().frame(height: barHeight + 12)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(
+                Group {
+                    if !isPreview {
+                        GeometryReader { contentGeo in
+                            Color.clear
+                                .preference(key: ScrollMetricsPreferenceKey.self, value: ScrollMetrics(
+                                    contentHeight: contentGeo.size.height
+                                ))
+                        }
+                    } else {
+                        Color.clear
+                    }
+                }
+            )
+        }
+        .coordinateSpace(name: "ScrollArea")
+        .onPreferenceChange(ScrollMetricsPreferenceKey.self) { metrics in
+            if let ch = metrics.contentHeight {
+                onContentHeightChanged(ch)
+            }
+        }
+    }
+
+    func onContentHeightChanged(_ perform: @escaping (CGFloat) -> Void) -> some View {
+        var copy = self
+        copy.onContentHeightChanged = perform
+        return copy
+    }
+}
+
+// MARK: Small extracted sections
+
+private struct JobNameField: View {
+    @Binding var jobName: String
+    @FocusState private var focused: Bool
+
+    init(jobName: Binding<String>) {
+        _jobName = jobName
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Job Name")
+                .font(.headline)
+
+            TextField("Enter job name", text: $jobName)
+                .textInputAutocapitalization(.words)
+                .submitLabel(.done)
+                .textFieldStyle(.roundedBorder)
+                .focused($focused)
+        }
+    }
+}
+
+private struct PhoneField: View {
+    @Binding var phoneNumber: String
+
+    init(phoneNumber: Binding<String>) {
+        _phoneNumber = phoneNumber
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Phone Number")
+                .font(.headline)
+
+            TextField("Enter phone number", text: $phoneNumber)
+                .keyboardType(.numberPad)
+                .textInputAutocapitalization(.never)
+                .submitLabel(.done)
+                .textFieldStyle(.roundedBorder)
+                .onChange(of: phoneNumber) { _, newValue in
+                    let filtered = newValue.filter { $0.isNumber }
+                    if filtered != newValue {
+                        phoneNumber = filtered
+                    }
+                }
+        }
+    }
+}
+
+private struct LocationField: View {
+    @Binding var jobLocation: String
+    @Binding var showSuggestions: Bool
+    let suggestions: [SuggestionItem]
+    let onSuggestionTapped: (SuggestionItem) -> Void
+    let onChange: (String) -> Void
+
+    init(
+        jobLocation: Binding<String>,
+        showSuggestions: Binding<Bool>,
+        suggestions: [SuggestionItem],
+        onSuggestionTapped: @escaping (SuggestionItem) -> Void,
+        onChange: @escaping (String) -> Void
+    ) {
+        _jobLocation = jobLocation
+        _showSuggestions = showSuggestions
+        self.suggestions = suggestions
+        self.onSuggestionTapped = onSuggestionTapped
+        self.onChange = onChange
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Job Location")
+                .font(.headline)
+
+            TextField("Enter job location", text: $jobLocation, onEditingChanged: { isEditing in
+                showSuggestions = isEditing && !jobLocation.isEmpty
+            })
+            .textInputAutocapitalization(.words)
+            .submitLabel(.done)
+            .textFieldStyle(.roundedBorder)
+            .onChange(of: jobLocation) { _, newValue in
+                onChange(newValue)
+            }
+
+            if showSuggestions && !suggestions.isEmpty {
+                SuggestionsList(suggestions: suggestions, onTap: onSuggestionTapped)
+            }
+        }
+    }
+}
+
+private struct SuggestionsList: View {
+    let suggestions: [SuggestionItem]
+    let onTap: (SuggestionItem) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(suggestions) { item in
+                Button {
+                    onTap(item)
+                } label: {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "mappin.and.ellipse")
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.title)
+                                .foregroundStyle(.primary)
+                            if !item.subtitle.isEmpty {
+                                Text(item.subtitle)
+                                    .foregroundStyle(.secondary)
+                                    .font(.subheadline)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                }
+                .buttonStyle(.plain)
+
+                if item.id != suggestions.last?.id {
+                    Divider()
+                }
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.systemBackground))
+                .shadow(color: .black.opacity(0.1), radius: 6, x: 0, y: 3)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color(.separator), lineWidth: 0.5)
+        )
+    }
+}
+
+private struct WindowCategoriesGrid: View {
+    let columns: [GridItem]
+
+    @Binding var groundCount: Int
+    @Binding var secondCount: Int
+    @Binding var threePlusCount: Int
+    @Binding var basementCount: Int
+
+    @Binding var groundPrice: Double
+    @Binding var secondPrice: Double
+    @Binding var threePlusPrice: Double
+    @Binding var basementPrice: Double
+
+    @Binding var groundUnit: PricingUnit
+    @Binding var secondUnit: PricingUnit
+    @Binding var threePlusUnit: PricingUnit
+    @Binding var basementUnit: PricingUnit
+
+    @Binding var groundUnitMenuOpen: Bool
+    @Binding var secondUnitMenuOpen: Bool
+    @Binding var threePlusUnitMenuOpen: Bool
+    @Binding var basementUnitMenuOpen: Bool
+
+    @Binding var isGroundExpanded: Bool
+    @Binding var isSecondExpanded: Bool
+    @Binding var isThreePlusExpanded: Bool
+    @Binding var isBasementExpanded: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Exterior")
+                .font(.headline)
+
+            LazyVGrid(columns: columns, alignment: .center, spacing: 5) {
+                categoryTile(
+                    title: "Ground Level",
+                    count: $groundCount,
+                    color: Color.blue,
+                    isExpanded: $isGroundExpanded,
+                    price: $groundPrice,
+                    unit: $groundUnit,
+                    isUnitMenuOpen: $groundUnitMenuOpen
+                )
+                .scaleEffect(0.95)
+
+                categoryTile(
+                    title: "Second Story",
+                    count: $secondCount,
+                    color: Color.teal,
+                    isExpanded: $isSecondExpanded,
+                    price: $secondPrice,
+                    unit: $secondUnit,
+                    isUnitMenuOpen: $secondUnitMenuOpen
+                )
+                .scaleEffect(0.95)
+
+                categoryTile(
+                    title: "3+ Story",
+                    count: $threePlusCount,
+                    color: Color.purple,
+                    isExpanded: $isThreePlusExpanded,
+                    price: $threePlusPrice,
+                    unit: $threePlusUnit,
+                    isUnitMenuOpen: $threePlusUnitMenuOpen
+                )
+                .scaleEffect(0.95)
+
+                categoryTile(
+                    title: "Basement",
+                    count: $basementCount,
+                    color: Color.indigo,
+                    isExpanded: $isBasementExpanded,
+                    price: $basementPrice,
+                    unit: $basementUnit,
+                    isUnitMenuOpen: $basementUnitMenuOpen
+                )
+                .scaleEffect(0.95)
+            }
+            .padding(.top, 2)
+            .padding(.horizontal, 7)
+        }
+    }
+
+    // Moved here so it's in scope for WindowCategoriesGrid
+    @ViewBuilder
+    private func categoryTile(
+        title: String,
+        count: Binding<Int>,
+        color: Color,
+        isExpanded: Binding<Bool>,
+        price: Binding<Double>,
+        unit: Binding<PricingUnit>,
+        isUnitMenuOpen: Binding<Bool>
+    ) -> some View {
+        let collapsedHeight: CGFloat = 300
+        let dropdownTransition: AnyTransition = isPreview ? .identity : .opacity.combined(with: .move(edge: .top))
+
+        VStack(spacing: 8) {
+            Text(title)
+                .font(.headline)
+                .frame(maxWidth: .infinity, alignment: Alignment.center)
+                .multilineTextAlignment(.center)
+
+            CountControlsRow(count: count)
+
+            VStack(alignment: .leading, spacing: 6) {
+                PricePerRow(isUnitMenuOpen: isUnitMenuOpen, price: price)
+
+                if isUnitMenuOpen.wrappedValue {
+                    UnitDropdownMenu(unit: unit)
+                        .padding(6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color(.systemBackground))
+                                .shadow(color: .black.opacity(0.1), radius: 6, x: 0, y: 3)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color(.separator), lineWidth: 0.5)
+                        )
+                        .transition(dropdownTransition)
+                        .highPriorityGesture(TapGesture())
+                }
+
+                let total = Double(count.wrappedValue) * price.wrappedValue
+                HStack(spacing: 6) {
+                    Text("Current total:")
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 2)
+                    Text(String(format: "$%.2f", total))
+                        .font(.headline.weight(.semibold))
+                        .kerning(-0.1)
+                }
+                .padding(.top, 2)
+            }
+            .padding(.vertical, 4)
+
+            if !isExpanded.wrappedValue {
+                Spacer(minLength: 8)
+            }
+
+            Button {
+                withAnimation(isPreview ? nil : .easeInOut) {
+                    isExpanded.wrappedValue.toggle()
+                }
+            } label: {
+                HStack(alignment: .center, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Advanced")
+                        Text("Modifiers")
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                    Spacer()
+
+                    let chevronRotation = Angle(degrees: isExpanded.wrappedValue ? 180 : 0)
+                    Image(systemName: "chevron.down")
+                        .font(.subheadline.weight(.semibold))
+                        .rotationEffect(chevronRotation)
+                        .animation(isPreview ? nil : .easeInOut(duration: 0.2), value: isExpanded.wrappedValue)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(.secondarySystemBackground))
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Advanced Modifiers")
+            .padding(.top, 4)
+            .padding(.bottom, 8)
+
+            if isExpanded.wrappedValue {
+                AdvancedOptionsBlock()
+                    .padding(.top, 2)
+                    .transition(isPreview ? .identity : .opacity.combined(with: .move(edge: .top)))
+                    .animation(isPreview ? nil : .easeInOut, value: isExpanded.wrappedValue)
+            }
+        }
+        .padding(10)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: collapsedHeight,
+            maxHeight: (isExpanded.wrappedValue || isUnitMenuOpen.wrappedValue) ? .infinity : collapsedHeight,
+            alignment: .topLeading
+        )
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(.systemBackground))
+                .shadow(color: .black.opacity(0.07), radius: 6, x: 0, y: 3)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(color.opacity(0.25), lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+        .animation(isPreview ? nil : .easeInOut(duration: 0.2), value: isUnitMenuOpen.wrappedValue)
+    }
+
+    // Copied helpers localized to the grid scope
+
+    private struct CountControlsRow: View {
+        @Binding var count: Int
+
+        init(count: Binding<Int>) {
+            self._count = count
+        }
+
+        var body: some View {
+            HStack(spacing: 12) {
+                Button {
+                    if count > 0 {
+                        count -= 1
+                    }
+                } label: {
+                    Image(systemName: "minus")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 36)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+                }
+
+                EditableCountField(count: $count)
+                    .frame(width: 60)
+
+                Button {
+                    count += 1
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 36)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+                }
+            }
+            .padding(.top, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private struct PricePerRow: View {
+        @Binding var isUnitMenuOpen: Bool
+        @Binding var price: Double
+
+        init(isUnitMenuOpen: Binding<Bool>, price: Binding<Double>) {
+            self._isUnitMenuOpen = isUnitMenuOpen
+            self._price = price
+        }
+
+        var body: some View {
+            HStack(alignment: .center, spacing: 8) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isUnitMenuOpen.toggle()
+                    }
+                } label: {
+                    VStack(spacing: 2) {
+                        Text("Price Per…")
+                            .font(.subheadline.weight(.semibold))
+                            .multilineTextAlignment(.center)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                        let chevronRotation = Angle(degrees: isUnitMenuOpen ? 180 : 0)
+                        Image(systemName: "chevron.down")
+                            .font(.subheadline.weight(.semibold))
+                            .rotationEffect(chevronRotation)
+                            .animation(.easeInOut(duration: 0.2), value: isUnitMenuOpen)
+                    }
+                    .frame(minWidth: 0, idealWidth: 140, maxWidth: 160)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 6)
+
+                PriceField(value: $price)
+                    .frame(minWidth: 85, idealWidth: 100, maxWidth: 110, alignment: .center)
+            }
+        }
+    }
+
+    private struct UnitDropdownMenu: View {
+        @Binding var unit: PricingUnit
+
+        init(unit: Binding<PricingUnit>) {
+            self._unit = unit
+        }
+
+        var body: some View {
+            VStack(spacing: 8) {
+                Picker("", selection: $unit) {
+                    Text("Window").tag(PricingUnit.window)
+                    Text("Pane").tag(PricingUnit.pane)
+                }
+                .pickerStyle(.segmented)
+            }
+        }
+    }
+
+    private struct AdvancedOptionsBlock: View {
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("Example toggle", systemImage: "slider.horizontal.3")
+                    Spacer()
+                    Toggle("", isOn: .constant(true))
+                        .labelsHidden()
+                }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(.tertiarySystemBackground))
+                )
+            }
+        }
+    }
+
+    // Localized versions so they are in scope for the grid/tile
+    private struct EditableCountField: View {
+        @Binding var count: Int
+        @State private var text: String = ""
+        @FocusState private var isFocused: Bool
+
+        var body: some View {
+            TextField("0", text: Binding(
+                get: {
+                    if text.isEmpty { return String(count) }
+                    return text
+                },
+                set: { newValue in
+                    let digits = newValue.filter { $0.isNumber }
+                    text = digits
+                    if let val = Int(digits) {
+                        count = max(0, val)
+                    } else if digits.isEmpty {
+                        count = 0
+                    }
+                }
+            ))
+            .keyboardType(.numberPad)
+            .focused($isFocused)
+            .multilineTextAlignment(.center)
+            .font(.system(size: 22, weight: .bold, design: .rounded))
+            .frame(minWidth: 50)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .onAppear {
+                text = String(count)
+            }
+            .onChange(of: count) { _, newValue in
+                let current = Int(text) ?? 0
+                if current != newValue {
+                    text = String(newValue)
+                }
+            }
+            .accessibilityLabel("Quantity")
+        }
+    }
+
+    private struct PriceField: View {
+        @Binding var value: Double
+        @State private var text: String = ""
+        @FocusState private var isFocused: Bool
+
+        var body: some View {
+            TextField("$0.00", text: Binding(
+                get: {
+                    if text.isEmpty { return currencyString(from: value) }
+                    return text
+                },
+                set: { newValue in
+                    // Allow optional leading "$", digits, and one decimal point.
+                    let filtered = filterCurrency(newValue)
+                    text = filtered
+                    let numeric = filtered.replacingOccurrences(of: "$", with: "")
+                    if let v = Double(numeric) {
+                        value = max(0, v)
+                    } else if numeric.isEmpty {
+                        value = 0
+                    }
+                }
+            ))
+            .keyboardType(.decimalPad)
+            .focused($isFocused)
+            .multilineTextAlignment(.center)
+            .font(.system(size: 18, weight: .semibold, design: .rounded))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .onAppear {
+                text = currencyString(from: value)
+            }
+            .onChange(of: value) { _, newValue in
+                let currentNumeric = Double(text.replacingOccurrences(of: "$", with: "")) ?? 0
+                if abs(currentNumeric - newValue) > 0.0001 {
+                    text = currencyString(from: newValue)
+                }
+            }
+            .onChange(of: isFocused) { _, focused in
+                if !focused {
+                    text = currencyString(from: value)
+                }
+            }
+            .accessibilityLabel("Price per unit")
+        }
+
+        private func currencyString(from v: Double) -> String {
+            return String(format: "$%.2f", v)
+        }
+
+        private func filterCurrency(_ s: String) -> String {
+            var result = ""
+            var hasDot = false
+            var hasDollar = false
+
+            for (i, ch) in s.enumerated() {
+                if ch == "$" && !hasDollar && i == 0 {
+                    result.append(ch)
+                    hasDollar = true
+                } else if ch.isNumber {
+                    result.append(ch)
+                } else if ch == "." && !hasDot {
+                    result.append(ch)
+                    hasDot = true
+                }
+            }
+
+            if !result.hasPrefix("$") {
+                result = "$" + result
+            }
+            if result == "$" || result == "$." {
+                result = "$0"
+            }
+            return result
+        }
+    }
+}
+
 #Preview {
     NavigationStack {
-        EstimatorMainView(source: .standard)
+        // Use mock provider so Canvas never touches MapKit/CoreLocation
+        EstimatorMainView(source: .standard, suggestionProvider: MockSuggestionProvider())
             .environmentObject(EstimatorStore())
     }
 }
