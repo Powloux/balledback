@@ -263,6 +263,9 @@ struct EstimatorMainView: View {
     @State private var threePlusModifiers: [AdvancedModifierItem] = baseModifiersSeed()
     @State private var basementModifiers: [AdvancedModifierItem] = baseModifiersSeed()
 
+    // Freeze scroll during layout-affecting toggles
+    @State private var isScrollFrozen: Bool = false
+
     // Enable Save if either job name OR job location OR phone OR any window count has content
     private var hasAnyCounts: Bool {
         groundCount > 0 || secondCount > 0 || threePlusCount > 0 || basementCount > 0
@@ -391,25 +394,33 @@ struct EstimatorMainView: View {
                     basementModifiers: $basementModifiers,
                     // Bottom itemization values
                     baseSubtotal: baseSubtotal,
-                    modifiersSubtotal: modifiersSubtotal
+                    modifiersSubtotal: modifiersSubtotal,
+                    // Freeze binding
+                    isScrollFrozen: $isScrollFrozen
                 )
                 .onContentHeightChanged { contentHeight = $0 }
             }
 
-            // Floating overlay version when not near bottom
-            if !nearBottom {
-                GrandTotalBar(total: grandTotal)
-                    .frame(height: barHeight)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 8)
-                    .transition(.previewSafe(.move(edge: .bottom).combined(with: .opacity)))
-            }
+            // Always-mounted overlay bar; fade/hit-test based on nearBottom to avoid view tree swaps.
+         //   GrandTotalBar(total: grandTotal)
+               // .frame(height: barHeight)
+               // .padding(.horizontal, 12)
+               // .padding(.bottom, 8)
+               // .opacity(nearBottom ? 0 : 1)
+               // .allowsHitTesting(!nearBottom)
         }
+        .safeAreaInset(edge: .bottom) {
+            GrandTotalBar(total: grandTotal)
+                .frame(height: barHeight)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+        }
+
         // Prevent keyboard safe-area adjustments from nudging the scroll when focusing fields
         .ignoresSafeArea(.keyboard)
-        .background(
+       .background(
             Group {
-                if !Preview.isActive {
+               if !Preview.isActive {
                     GeometryReader { _ in
                         Color.clear
                             .overlay(
@@ -424,7 +435,7 @@ struct EstimatorMainView: View {
             }
         )
 
-        .navigationTitle(existingEstimate == nil ? "" : "Edit Estimate")
+        .navigationTitle(existingEstimate == nil ? "New Estimate" : "Edit Estimate")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
 
@@ -649,7 +660,7 @@ struct EstimatorMainView: View {
             basementModifiers: basementModifiers
         )
 
-        if let existing = existingEstimate {
+    if let existing = existingEstimate {
             store.update(id: existing.id, with: trimmed, from: source)
         } else {
             store.add(trimmed, from: source)
@@ -1032,11 +1043,11 @@ private struct ScrollContent: View {
     let baseSubtotal: Double
     let modifiersSubtotal: Double
 
+    // Freeze binding from parent
+    @Binding var isScrollFrozen: Bool
+
     // Preference writer
     var onContentHeightChanged: (CGFloat) -> Void = { _ in }
-
-    // Freeze flag
-    @State private var isScrollFrozen = false
 
     private var columns: [GridItem] {
         [
@@ -1090,7 +1101,8 @@ private struct ScrollContent: View {
                     groundModifiers: $groundModifiers,
                     secondModifiers: $secondModifiers,
                     threePlusModifiers: $threePlusModifiers,
-                    basementModifiers: $basementModifiers
+                    basementModifiers: $basementModifiers,
+                    isScrollFrozen: $isScrollFrozen
                 )
 
                 // Bottom itemization section
@@ -1112,23 +1124,8 @@ private struct ScrollContent: View {
                 )
                 .padding(.top, 8)
 
-                if nearBottom {
-                    // Footer version of the Grand Total bar when near bottom (locks in)
-                    let ground = tileTotal(count: groundCount, basePrice: groundPrice, modifiers: groundModifiers)
-                    let second = tileTotal(count: secondCount, basePrice: secondPrice, modifiers: secondModifiers)
-                    let threePlus = tileTotal(count: threePlusCount, basePrice: threePlusPrice, modifiers: threePlusModifiers)
-                    let basement = tileTotal(count: basementCount, basePrice: basementPrice, modifiers: basementModifiers)
-                    let total = ground + second + threePlus + basement
-
-                    GrandTotalBar(total: total)
-                        .frame(height: barHeight)
-                        .padding(.top, 8)
-                }
-
-                // Spacer to avoid overlay overlap
-                if !nearBottom {
-                    Spacer().frame(height: barHeight + 12)
-                }
+                // Always reserve space for the overlay bar to avoid layout shifts.
+                Spacer().frame(height: barHeight + 12)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
@@ -1348,6 +1345,9 @@ private struct WindowCategoriesGrid: View {
     @Binding var threePlusModifiers: [AdvancedModifierItem]
     @Binding var basementModifiers: [AdvancedModifierItem]
 
+    // Freeze binding propagated down
+    @Binding var isScrollFrozen: Bool
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Exterior")
@@ -1442,7 +1442,8 @@ private struct WindowCategoriesGrid: View {
             CountControlsRow(count: count)
 
             VStack(alignment: .leading, spacing: 6) {
-                PricePerRow(isUnitMenuOpen: isUnitMenuOpen, price: price)
+                // Pass isScrollFrozen down to PricePerRow
+                PricePerRow(isUnitMenuOpen: isUnitMenuOpen, price: price, isScrollFrozen: $isScrollFrozen)
 
                 if isUnitMenuOpen.wrappedValue {
                     UnitDropdownMenu(unit: unit)
@@ -1470,7 +1471,7 @@ private struct WindowCategoriesGrid: View {
 
                 // Breakdown toggle
                 Button {
-                    FreezeScroll.perform(in: "ScrollArea", isFrozen: .constant(false)) {
+                    FreezeScroll.perform(in: "ScrollArea", isFrozen: $isScrollFrozen) {
                         showBreakdown.wrappedValue.toggle()
                     }
                 } label: {
@@ -1501,7 +1502,7 @@ private struct WindowCategoriesGrid: View {
             }
 
             Button {
-                FreezeScroll.perform(in: "ScrollArea", isFrozen: .constant(false)) {
+                FreezeScroll.perform(in: "ScrollArea", isFrozen: $isScrollFrozen) {
                     isExpanded.wrappedValue.toggle()
                 }
             } label: {
@@ -1610,17 +1611,19 @@ private struct WindowCategoriesGrid: View {
     private struct PricePerRow: View {
         @Binding var isUnitMenuOpen: Bool
         @Binding var price: Double
+        @Binding var isScrollFrozen: Bool
 
-        init(isUnitMenuOpen: Binding<Bool>, price: Binding<Double>) {
+        init(isUnitMenuOpen: Binding<Bool>, price: Binding<Double>, isScrollFrozen: Binding<Bool>) {
             self._isUnitMenuOpen = isUnitMenuOpen
             self._price = price
+            self._isScrollFrozen = isScrollFrozen
         }
 
         var body: some View {
             HStack(alignment: .center, spacing: 8) {
                 Button {
                     // Freeze scroll while toggling the unit menu
-                    FreezeScroll.perform(in: "ScrollArea", isFrozen: .constant(false)) {
+                    FreezeScroll.perform(in: "ScrollArea", isFrozen: $isScrollFrozen) {
                         isUnitMenuOpen.toggle()
                     }
                 } label: {
