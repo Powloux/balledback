@@ -22,6 +22,15 @@ struct PremiumHomeView: View {
     @State private var deletingID: UUID?
     @State private var prePopID: UUID?
 
+    // Account sheet
+    @State private var showAccount = false
+
+    // Set Standard Pricing sheet
+    @State private var showStandardPricing = false
+
+    // Online/Offline toggle (placeholder state for now)
+    @State private var isOnline = true
+
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             Group {
@@ -121,21 +130,58 @@ struct PremiumHomeView: View {
             }
         }
         .animation(.spring(duration: 0.35), value: showUndoBanner)
-        .navigationTitle("Premium")
+        .navigationTitle("Hello, User")
         .navigationDestination(isPresented: $goToEstimator) {
             EstimatorMainView(source: .premium)
         }
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                // Compact Online/Offline chip (slightly larger to avoid truncation)
+                OnlineStatusChip(isOnline: $isOnline)
+
+                // Account button
+                Button {
+                    showAccount = true
+                } label: {
+                    Image(systemName: "person.crop.circle")
+                        .font(.title3)
+                        .accessibilityLabel("Account")
+                }
+
+                // Settings menu restored, with "Set Standard Pricing" inside
                 Menu {
-                    // Premium-specific settings will go here in the future
-                    Button("More settings to come") {}
-                        .disabled(true)
+                    Button("Set Standard Pricing") {
+                        showStandardPricing = true
+                    }
+                    // Future settings can be added here
                 } label: {
                     Image(systemName: "ellipsis.circle")
                         .font(.title3)
                         .accessibilityLabel("Settings")
                 }
+            }
+        }
+        .sheet(isPresented: $showAccount) {
+            NavigationStack {
+                VStack(spacing: 16) {
+                    Text("Account")
+                        .font(.largeTitle).bold()
+                    Text("This is a placeholder for your account details and preferences.")
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal)
+                }
+                .padding()
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") { showAccount = false }
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showStandardPricing) {
+            NavigationStack {
+                SetStandardPricingPlaceholder()
             }
         }
         .onDisappear {
@@ -192,6 +238,105 @@ struct PremiumHomeView: View {
     private func invalidateUndoTimer() {
         undoTimer?.invalidate()
         undoTimer = nil
+    }
+}
+
+// MARK: - Compact online status chip for toolbar
+
+private struct OnlineStatusChip: View {
+    @Binding var isOnline: Bool
+
+    var body: some View {
+        Button {
+            isOnline.toggle()
+        } label: {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(isOnline ? Color.green : Color.gray)
+                    .frame(width: 10, height: 10)
+                Text(isOnline ? "Online" : "Offline")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.9)
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 7)
+            .frame(minWidth: 90)
+            .background(
+                Capsule()
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(Color(.separator), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isOnline ? "Status: Online" : "Status: Offline")
+        .accessibilityHint("Double tap to toggle online status")
+    }
+}
+
+// MARK: - Placeholder for Set Standard Pricing
+
+private struct SetStandardPricingPlaceholder: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Set Standard Pricing")
+                .font(.largeTitle).bold()
+
+            Text("Here you'll set default pricing for each window category used in new estimates. We'll connect this to your account and sync it later.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+
+            // Simple illustrative placeholders
+            VStack(alignment: .leading, spacing: 10) {
+                PlaceholderRow(title: "Ground Level")
+                PlaceholderRow(title: "Second Story")
+                PlaceholderRow(title: "3+ Story")
+                PlaceholderRow(title: "Basement")
+            }
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(.secondarySystemBackground))
+            )
+
+            Spacer()
+
+            Button {
+                dismiss()
+            } label: {
+                Text("Done")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding()
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Close") { dismiss() }
+            }
+        }
+    }
+
+    private struct PlaceholderRow: View {
+        let title: String
+        @State private var priceText: String = ""
+
+        var body: some View {
+            HStack(spacing: 12) {
+                Text(title)
+                    .frame(width: 110, alignment: .leading)
+                TextField("$0.00", text: $priceText)
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
     }
 }
 
