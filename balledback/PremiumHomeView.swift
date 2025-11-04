@@ -31,6 +31,9 @@ struct PremiumHomeView: View {
     // Online/Offline toggle (placeholder state for now)
     @State private var isOnline = true
 
+    // Bottom bar height (approximate visual height incl. padding)
+    private let bottomBarHeight: CGFloat = 64
+
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             Group {
@@ -115,7 +118,9 @@ struct PremiumHomeView: View {
                     .background(Circle().fill(Color.blue))
                     .shadow(color: .black.opacity(0.2), radius: 6, x: 0, y: 3)
             }
-            .padding(20)
+            .padding(.trailing, 20)
+            // Lift the FAB up enough to clear the inset bottom bar
+            .padding(.bottom, bottomBarHeight + 20)
             .accessibilityLabel("Add")
 
             // Undo banner overlay above the FAB
@@ -125,7 +130,8 @@ struct PremiumHomeView: View {
                     onUndo: { performUndo() }
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-                .padding(.bottom, 92)
+                // Place above FAB and bottom bar
+                .padding(.bottom, bottomBarHeight + 88)
                 .padding(.horizontal, 16)
             }
         }
@@ -183,8 +189,23 @@ struct PremiumHomeView: View {
             NavigationStack {
                 SetStandardPricingView(current: store.standardPricing)
                     .environmentObject(store)
-                //SetStandardPricingPlaceholder()
             }
+        }
+        // Inject the bottom action bar using safeAreaInset so it always stays at the bottom
+        .safeAreaInset(edge: .bottom) {
+            BottomActionBar()
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 8) // minimal horizontal padding to maximize width
+                .padding(.top, 6)
+                .padding(.bottom, 8)
+                .background(.thinMaterial) // subtle background; can change to Color(.systemBackground)
+                .overlay(
+                    // Top divider only, to separate from content without stealing width
+                    Rectangle()
+                        .fill(Color(.separator))
+                        .frame(height: 0.5)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                )
         }
         .onDisappear {
             invalidateUndoTimer()
@@ -243,6 +264,51 @@ struct PremiumHomeView: View {
     }
 }
 
+// MARK: - Bottom Action Bar (5 placeholder buttons)
+
+private struct BottomActionBar: View {
+    var body: some View {
+        HStack(spacing: 0) {
+            // Dashboard uses a house icon now
+            PlaceholderButton(title: "Dashboard", systemImage: "house.fill")
+            Divider().frame(height: 28).opacity(0.2)
+            PlaceholderButton(title: "Quotes", systemImage: "long.text.page.and.pencil.fill")
+            Divider().frame(height: 28).opacity(0.2)
+            PlaceholderButton(title: "Team", systemImage: "person.2.wave.2.fill")
+            Divider().frame(height: 28).opacity(0.2)
+            PlaceholderButton(title: "Map", systemImage: "map.fill")
+            Divider().frame(height: 28).opacity(0.2)
+            PlaceholderButton(title: "Customers", systemImage: "person.3.fill")
+        }
+    }
+
+    private struct PlaceholderButton: View {
+        let title: String
+        let systemImage: String
+
+        var body: some View {
+            Button {
+                // placeholder action
+            } label: {
+                VStack(spacing: 2) {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 16, weight: .semibold)) // slightly smaller icon
+                    Text(title)
+                        .font(.footnote.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2) // allow two lines
+                        .minimumScaleFactor(0.85) // scale down if needed
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6) // minimal vertical padding
+            }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+            .accessibilityLabel(title)
+        }
+    }
+}
+
 // MARK: - Compact online status chip for toolbar
 
 private struct OnlineStatusChip: View {
@@ -279,69 +345,7 @@ private struct OnlineStatusChip: View {
     }
 }
 
-// MARK: - Placeholder for Set Standard Pricing
-
-private struct SetStandardPricingPlaceholder: View {
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Text("Set Standard Pricing")
-                .font(.largeTitle).bold()
-
-            Text("Here you'll set default pricing for each window category used in new estimates. We'll connect this to your account and sync it later.")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal)
-
-            // Simple illustrative placeholders
-            VStack(alignment: .leading, spacing: 10) {
-                PlaceholderRow(title: "Ground Level")
-                PlaceholderRow(title: "Second Story")
-                PlaceholderRow(title: "3+ Story")
-                PlaceholderRow(title: "Basement")
-            }
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(.secondarySystemBackground))
-            )
-
-            Spacer()
-
-            Button {
-                dismiss()
-            } label: {
-                Text("Done")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-        }
-        .padding()
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Close") { dismiss() }
-            }
-        }
-    }
-
-    private struct PlaceholderRow: View {
-        let title: String
-        @State private var priceText: String = ""
-
-        var body: some View {
-            HStack(spacing: 12) {
-                Text(title)
-                    .frame(width: 110, alignment: .leading)
-                TextField("$0.00", text: $priceText)
-                    .keyboardType(.decimalPad)
-                    .textFieldStyle(.roundedBorder)
-            }
-        }
-    }
-}
-
 #Preview {
     NavigationStack { PremiumHomeView().environmentObject(EstimatorStore()) }
 }
+

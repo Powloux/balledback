@@ -46,11 +46,70 @@ final class EstimatorStore: ObservableObject {
         standardPricing = newPricing // will auto-save
     }
 
-    // ...existing methods unchanged...
-    func add(_ estimate: Estimate, from source: EstimatorSource) { /* ... */ }
-    func remove(id: UUID, from source: EstimatorSource) { /* ... */ }
-    func clearAll(for source: EstimatorSource) { /* ... */ }
-    func update(id: UUID, with updated: Estimate, from source: EstimatorSource) { /* ... */ }
-    func insert(_ estimate: Estimate, at index: Int, for source: EstimatorSource) { /* ... */ }
-    func append(_ estimate: Estimate, for source: EstimatorSource) { /* ... */ }
+    // MARK: - Estimates routing (in-memory)
+
+    func add(_ estimate: Estimate, from source: EstimatorSource) {
+        switch source {
+        case .standard:
+            standardEstimates.append(estimate)
+        case .premium:
+            premiumEstimates.append(estimate)
+        }
+    }
+
+    func remove(id: UUID, from source: EstimatorSource) {
+        switch source {
+        case .standard:
+            if let idx = standardEstimates.firstIndex(where: { $0.id == id }) {
+                standardEstimates.remove(at: idx)
+            }
+        case .premium:
+            if let idx = premiumEstimates.firstIndex(where: { $0.id == id }) {
+                premiumEstimates.remove(at: idx)
+            }
+        }
+    }
+
+    func clearAll(for source: EstimatorSource) {
+        switch source {
+        case .standard:
+            standardEstimates.removeAll()
+        case .premium:
+            premiumEstimates.removeAll()
+        }
+    }
+
+    func update(id: UUID, with updated: Estimate, from source: EstimatorSource) {
+        switch source {
+        case .standard:
+            if let idx = standardEstimates.firstIndex(where: { $0.id == id }) {
+                standardEstimates[idx] = updated
+            }
+        case .premium:
+            if let idx = premiumEstimates.firstIndex(where: { $0.id == id }) {
+                premiumEstimates[idx] = updated
+            }
+        }
+    }
+
+    func insert(_ estimate: Estimate, at index: Int, for source: EstimatorSource) {
+        switch source {
+        case .standard:
+            let i = max(0, min(index, standardEstimates.count))
+            standardEstimates.insert(estimate, at: i)
+        case .premium:
+            let i = max(0, min(index, premiumEstimates.count))
+            premiumEstimates.insert(estimate, at: i)
+        }
+    }
+
+    func append(_ estimate: Estimate, for source: EstimatorSource) {
+        switch source {
+        case .standard:
+            standardEstimates.append(estimate)
+        case .premium:
+            premiumEstimates.append(estimate)
+        }
+    }
 }
+

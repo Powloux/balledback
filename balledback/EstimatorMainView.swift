@@ -466,6 +466,20 @@ struct EstimatorMainView: View {
                 if let sm = estimate.secondModifiers { secondModifiers = sm }
                 if let tm = estimate.threePlusModifiers { threePlusModifiers = tm }
                 if let bm = estimate.basementModifiers { basementModifiers = bm }
+            } else {
+                // NEW: Apply saved pricing defaults ONLY for new estimates opened from Premium
+                if source == .premium {
+                    let p = store.standardPricing
+                    groundPrice = p.groundPrice
+                    secondPrice = p.secondPrice
+                    threePlusPrice = p.threePlusPrice
+                    basementPrice = p.basementPrice
+
+                    groundUnit = p.groundUnit
+                    secondUnit = p.secondUnit
+                    threePlusUnit = p.threePlusUnit
+                    basementUnit = p.basementUnit
+                }
             }
 
             // Capture initial values for dirty checking
@@ -2411,3 +2425,4 @@ fileprivate func tileTotal(count: Int, basePrice: Double, modifiers: [AdvancedMo
             .environmentObject(EstimatorStore())
     }
 }
+
