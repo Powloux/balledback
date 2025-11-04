@@ -5,7 +5,6 @@
 //  Created by James Perrow on 10/16/25.
 //
 
-
 import SwiftUI
 
 struct PremiumLoginView: View {
@@ -34,22 +33,19 @@ struct PremiumLoginView: View {
                     .textFieldStyle(.roundedBorder)
 
                 Button {
-                    // For now, immediately navigate to PremiumHomeView
                     goToPremiumHome = true
                 } label: {
                     Text("Sign In")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                // You can enable validation by uncommenting:
-                // .disabled(email.isEmpty || password.isEmpty)
             }
             .padding(.top, 8)
         }
         .padding()
         .navigationTitle("Premium Login")
         .navigationDestination(isPresented: $goToPremiumHome) {
-            PremiumHomeView()
+            PremiumHomeContainerView()
         }
     }
 }

@@ -4,18 +4,19 @@ import SwiftUI
 struct PremiumHomeContainerView: View {
     @State private var selected: PremiumSection = .dashboard
     @EnvironmentObject private var store: EstimatorStore
+    @StateObject private var router = PremiumRouter()
+    @State private var path = NavigationPath()
 
     // Approximate visual height of the bottom bar to place floating elements above it if needed later
     private let bottomBarHeight: CGFloat = 64
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ZStack(alignment: .bottomTrailing) {
                 Group {
                     switch selected {
                     case .dashboard:
-                        // Use existing PremiumHomeView unchanged
-                        PremiumHomeView()
+                        DashboardHomeView()
                             .environmentObject(store)
 
                     case .quotes:
@@ -46,6 +47,16 @@ struct PremiumHomeContainerView: View {
                     )
             }
         }
+        // Attach navigationDestination directly to the NavigationStack via the .navigationDestination modifier on the container
+        .navigationDestination(isPresented: $router.showEstimator) {
+            EstimatorMainView(
+                source: .premium,
+                existingEstimate: router.editingEstimate
+            )
+            .environmentObject(store)
+        }
+        // Inject router so children can request navigation
+        .environmentObject(router)
     }
 }
 
