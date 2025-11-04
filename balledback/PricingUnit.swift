@@ -7,7 +7,8 @@
 
 import Foundation
 
-enum PricingUnit: String, CaseIterable, Identifiable, Hashable {
+//enum PricingUnit: String, CaseIterable, Identifiable, Hashable {
+    enum PricingUnit: String, CaseIterable, Identifiable, Hashable, Codable {
     case window
     case pane
 

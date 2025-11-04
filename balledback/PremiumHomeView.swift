@@ -181,7 +181,9 @@ struct PremiumHomeView: View {
         }
         .sheet(isPresented: $showStandardPricing) {
             NavigationStack {
-                SetStandardPricingPlaceholder()
+                SetStandardPricingView(current: store.standardPricing)
+                    .environmentObject(store)
+                //SetStandardPricingPlaceholder()
             }
         }
         .onDisappear {
