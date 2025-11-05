@@ -55,6 +55,12 @@ struct PremiumHomeContainerView: View {
             )
             .environmentObject(store)
         }
+        // NEW: Calendar destination
+        .navigationDestination(isPresented: $router.showCalendar) {
+            CalendarView()
+                .environmentObject(store)
+                .environmentObject(router)
+        }
         // Inject router so children can request navigation
         .environmentObject(router)
     }

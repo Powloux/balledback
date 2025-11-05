@@ -27,9 +27,6 @@ struct DashboardHomeView: View {
     // Bottom bar height (approximate visual height incl. padding)
     private let bottomBarHeight: CGFloat = 64
 
-    // Calendar selection (local state for now)
-    @State private var selectedDate: Date = Date()
-
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             Group {
@@ -41,8 +38,10 @@ struct DashboardHomeView: View {
                             WeatherPlaceholderCard()
                                 .padding(.bottom, 8)
 
-                            // Calendar widget under weather
-                            CalendarCard(selectedDate: $selectedDate)
+                            // Today schedule card under weather
+                            TodayScheduleCard()
+                                .environmentObject(store)
+                                .environmentObject(router)
                                 .padding(.bottom, 8)
 
                             Text("Premium Home")
@@ -66,8 +65,10 @@ struct DashboardHomeView: View {
                             WeatherPlaceholderCard()
                                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
 
-                            // Calendar widget directly under weather
-                            CalendarCard(selectedDate: $selectedDate)
+                            // Today schedule card directly under weather
+                            TodayScheduleCard()
+                                .environmentObject(store)
+                                .environmentObject(router)
                                 .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
                         }
 
@@ -311,49 +312,115 @@ private struct WeatherPlaceholderCard: View {
     }
 }
 
-// Calendar card widget styled like WeatherPlaceholderCard
-private struct CalendarCard: View {
-    @Binding var selectedDate: Date
+// NEW: Today schedule card showing only today's jobs between 7 AM and 7 PM
+private struct TodayScheduleCard: View {
+    @EnvironmentObject private var store: EstimatorStore
+    @EnvironmentObject private var router: PremiumRouter
 
-    private var titleDateFormatter: DateFormatter {
+    private var today: Date { Date() }
+    private var interval7to7: DateInterval {
+        let cal = Calendar.current
+        let start = cal.date(bySettingHour: 7, minute: 0, second: 0, of: today) ?? today
+        let end = cal.date(bySettingHour: 19, minute: 0, second: 0, of: today) ?? today.addingTimeInterval(12 * 3600)
+        return DateInterval(start: start, end: end)
+    }
+
+    private var jobsToday: [ScheduledJob] {
+        store.jobs(on: today, in: interval7to7)
+    }
+
+    private let timeFormatter: DateFormatter = {
         let df = DateFormatter()
-        df.dateFormat = "MMMM yyyy"
+        df.timeStyle = .short
+        df.dateStyle = .none
         return df
+    }()
+
+    private var headerDateString: String {
+        let df = DateFormatter()
+        df.dateFormat = "EEEE, MMM d"
+        return df.string(from: today)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Calendar")
-                    .font(.headline)
-                Spacer()
-                Text(titleDateFormatter.string(from: selectedDate))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
+        Button {
+            router.openCalendar()
+        } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Today")
+                            .font(.headline)
+                        Text(headerDateString)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text("7:00 AM – 7:00 PM")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "calendar")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.blue)
+                }
 
-            // Graphical calendar style (interactive)
-            DatePicker(
-                "",
-                selection: $selectedDate,
-                displayedComponents: [.date]
+                if jobsToday.isEmpty {
+                    Text("No scheduled jobs in this window.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(jobsToday) { job in
+                            if let estimate = (store.premiumEstimates.first { $0.id == job.estimateID } ?? store.standardEstimates.first { $0.id == job.estimateID }) {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text("\(timeFormatter.string(from: job.startDate)) – \(timeFormatter.string(from: job.endDate))")
+                                        .font(.footnote.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 112, alignment: .leading)
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(estimate.jobName.isEmpty ? "Untitled Estimate" : estimate.jobName)
+                                            .font(.subheadline.weight(.semibold))
+                                        if !estimate.jobLocation.isEmpty {
+                                            Text(estimate.jobLocation)
+                                                .font(.footnote)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+
+                                    Spacer()
+                                }
+                            } else {
+                                // Fallback if estimate not found
+                                HStack {
+                                    Text("\(timeFormatter.string(from: job.startDate)) – \(timeFormatter.string(from: job.endDate))")
+                                        .font(.footnote.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                    Text("Job")
+                                    Spacer()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color(.secondarySystemBackground))
+                    .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 3)
             )
-            .datePickerStyle(.graphical)
-            .labelsHidden()
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color(.separator), lineWidth: 0.5)
+            )
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(.secondarySystemBackground))
-                .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 3)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color(.separator), lineWidth: 0.5)
-        )
+        .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Calendar. \(DateFormatter.localizedString(from: selectedDate, dateStyle: .long, timeStyle: .none)) selected.")
+        .accessibilityLabel("Today. \(headerDateString). Tap to open calendar.")
     }
 }
 

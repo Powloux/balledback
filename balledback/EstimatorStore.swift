@@ -15,6 +15,9 @@ final class EstimatorStore: ObservableObject {
     @Published private(set) var standardEstimates: [Estimate] = []
     @Published private(set) var premiumEstimates: [Estimate] = []
 
+    // NEW: scheduled jobs (read-only for now; no UI to add/edit yet)
+    @Published var scheduledJobs: [ScheduledJob] = []
+
     // NEW: Standard pricing defaults
     @Published var standardPricing: StandardPricing = .default {
         didSet { saveStandardPricing() }
@@ -111,5 +114,20 @@ final class EstimatorStore: ObservableObject {
             premiumEstimates.append(estimate)
         }
     }
-}
 
+    // MARK: - Scheduling helpers (read-only use for now)
+
+    // Return scheduled jobs that overlap the given interval and occur on the given day,
+    // sorted by start time ascending.
+    func jobs(on day: Date, in interval: DateInterval) -> [ScheduledJob] {
+        let cal = Calendar.current
+        return scheduledJobs
+            .filter { job in
+                // Same calendar day as 'day'
+                cal.isDate(job.startDate, inSameDayAs: day) &&
+                // Overlaps the interval [start, end]
+                job.endDate > interval.start && job.startDate < interval.end
+            }
+            .sorted { $0.startDate < $1.startDate }
+    }
+}

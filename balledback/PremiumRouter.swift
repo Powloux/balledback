@@ -8,6 +8,9 @@ final class PremiumRouter: ObservableObject {
     @Published var showEstimator: Bool = false
     @Published var editingEstimate: Estimate? = nil
 
+    // NEW: Calendar routing
+    @Published var showCalendar: Bool = false
+
     // Entry points
     func openNewEstimate() {
         editingEstimate = nil
@@ -22,5 +25,14 @@ final class PremiumRouter: ObservableObject {
     func dismissEstimator() {
         showEstimator = false
         editingEstimate = nil
+    }
+
+    // NEW: Calendar entry points
+    func openCalendar() {
+        showCalendar = true
+    }
+
+    func dismissCalendar() {
+        showCalendar = false
     }
 }
