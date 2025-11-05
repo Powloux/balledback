@@ -27,6 +27,9 @@ struct DashboardHomeView: View {
     // Bottom bar height (approximate visual height incl. padding)
     private let bottomBarHeight: CGFloat = 64
 
+    // Calendar selection (local state for now)
+    @State private var selectedDate: Date = Date()
+
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             Group {
@@ -34,6 +37,14 @@ struct DashboardHomeView: View {
                     // Empty state
                     ScrollView {
                         VStack(spacing: 12) {
+                            // Weather placeholder under the title area
+                            WeatherPlaceholderCard()
+                                .padding(.bottom, 8)
+
+                            // Calendar widget under weather
+                            CalendarCard(selectedDate: $selectedDate)
+                                .padding(.bottom, 8)
+
                             Text("Premium Home")
                                 .font(.largeTitle)
                                 .bold()
@@ -50,6 +61,16 @@ struct DashboardHomeView: View {
                 } else {
                     // Use List to enable native swipe-to-delete
                     List {
+                        // Weather placeholder section at the top of the dashboard
+                        Section("Weather") {
+                            WeatherPlaceholderCard()
+                                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+
+                            // Calendar widget directly under weather
+                            CalendarCard(selectedDate: $selectedDate)
+                                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+                        }
+
                         Section("Saved Estimates") {
                             ForEach(store.premiumEstimates) { estimate in
                                 Button {
@@ -243,6 +264,96 @@ struct DashboardHomeView: View {
     private func invalidateUndoTimer() {
         undoTimer?.invalidate()
         undoTimer = nil
+    }
+}
+
+// Simple placeholder weather card to remind you to implement real weather later
+private struct WeatherPlaceholderCard: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.blue.opacity(0.15))
+                    .frame(width: 44, height: 44)
+                Image(systemName: "cloud.sun.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.orange, .yellow, .blue)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Weather")
+                    .font(.headline)
+                Text("72° • Partly Cloudy")
+                    .font(.subheadline.weight(.semibold))
+                Text("Forecast: High 78° / Low 62°")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(.secondarySystemBackground))
+                .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 3)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(.separator), lineWidth: 0.5)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Weather. Seventy two degrees, partly cloudy. Forecast high seventy eight, low sixty two.")
+    }
+}
+
+// Calendar card widget styled like WeatherPlaceholderCard
+private struct CalendarCard: View {
+    @Binding var selectedDate: Date
+
+    private var titleDateFormatter: DateFormatter {
+        let df = DateFormatter()
+        df.dateFormat = "MMMM yyyy"
+        return df
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Calendar")
+                    .font(.headline)
+                Spacer()
+                Text(titleDateFormatter.string(from: selectedDate))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            // Graphical calendar style (interactive)
+            DatePicker(
+                "",
+                selection: $selectedDate,
+                displayedComponents: [.date]
+            )
+            .datePickerStyle(.graphical)
+            .labelsHidden()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(.secondarySystemBackground))
+                .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 3)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(.separator), lineWidth: 0.5)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Calendar. \(DateFormatter.localizedString(from: selectedDate, dateStyle: .long, timeStyle: .none)) selected.")
     }
 }
 
