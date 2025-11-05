@@ -13,25 +13,26 @@ struct PremiumHomeContainerView: View {
     var body: some View {
         NavigationStack(path: $path) {
             ZStack(alignment: .bottomTrailing) {
-                Group {
-                    switch selected {
-                    case .dashboard:
-                        DashboardHomeView()
-                            .environmentObject(store)
+                // Replace the manual switch with a page-style TabView
+                TabView(selection: $selected) {
+                    DashboardHomeView()
+                        .environmentObject(store)
+                        .environmentObject(router)
+                        .tag(PremiumSection.dashboard)
 
-                    case .quotes:
-                        QuotesHomeView()
+                    QuotesHomeView()
+                        .tag(PremiumSection.quotes)
 
-                    case .team:
-                        TeamHomeView()
+                    TeamHomeView()
+                        .tag(PremiumSection.team)
 
-                    case .map:
-                        MapHomeView()
+                    MapHomeView()
+                        .tag(PremiumSection.map)
 
-                    case .customers:
-                        CustomersHomeView()
-                    }
+                    CustomersHomeView()
+                        .tag(PremiumSection.customers)
                 }
+                .tabViewStyle(.page(indexDisplayMode: .never)) // enables horizontal swipe, hides dots
             }
             .safeAreaInset(edge: .bottom) {
                 SelectionBottomActionBar(selected: $selected)
