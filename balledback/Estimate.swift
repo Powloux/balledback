@@ -10,7 +10,7 @@ import Foundation
 struct Estimate: Identifiable, Hashable {
     let id: UUID
     let createdAt: Date
-
+//
     var jobName: String
     var phoneNumber: String
     var jobLocation: String
