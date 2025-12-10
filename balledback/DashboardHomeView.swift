@@ -38,49 +38,31 @@ struct DashboardHomeView: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             Group {
-                if store.premiumEstimates.isEmpty {
-                    // Empty state
-                    ScrollView {
-                        VStack(spacing: 12) {
-                            // Weather placeholder under the title area
-                            WeatherPlaceholderCard()
-                                .padding(.bottom, 8)
+                // Always use a List so sections are consistently present
+                List {
+                    // Weather placeholder section at the top of the dashboard
+                    Section("Weather") {
+                        WeatherPlaceholderCard()
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
 
-                            // Today schedule card under weather
-                            TodayScheduleCard()
-                                .environmentObject(store)
-                                .environmentObject(router)
-                                .padding(.bottom, 8)
-
-                            Text("Premium Home")
-                                .font(.largeTitle)
-                                .bold()
-                            Text("This is a placeholder for the premium experience.")
-                                .foregroundStyle(.secondary)
-
-                            Text("No saved estimates yet.")
-                                .foregroundStyle(.secondary)
-                                .padding(.top, 8)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .top)
-                        .padding()
+                        // Today schedule card directly under weather
+                        TodayScheduleCard()
+                            .environmentObject(store)
+                            .environmentObject(router)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
                     }
-                } else {
-                    // Use List to enable native swipe-to-delete
-                    List {
-                        // Weather placeholder section at the top of the dashboard
-                        Section("Weather") {
-                            WeatherPlaceholderCard()
-                                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
 
-                            // Today schedule card directly under weather
-                            TodayScheduleCard()
-                                .environmentObject(store)
-                                .environmentObject(router)
-                                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
-                        }
-
-                        Section("Recent Estimates") {
+                    // Rigid Recent Estimates section: always present
+                    Section("Recent Estimates") {
+                        if recentPremiumEstimates.isEmpty {
+                            // Placeholder row when there are no recent estimates
+                            HStack {
+                                Text("No recent estimates yet.")
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                            }
+                            .padding(.vertical, 6)
+                        } else {
                             ForEach(recentPremiumEstimates) { estimate in
                                 Button {
                                     // Route edit via router so it pushes on the container’s NavigationStack
@@ -145,8 +127,8 @@ struct DashboardHomeView: View {
                             }
                         }
                     }
-                    .listStyle(.insetGrouped)
                 }
+                .listStyle(.insetGrouped)
             }
 
             // Floating action button pinned to bottom-right
@@ -482,4 +464,3 @@ private struct OnlineStatusChip: View {
 #Preview {
     NavigationStack { DashboardHomeView().environmentObject(EstimatorStore()) }
 }
-
