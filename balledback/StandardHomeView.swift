@@ -22,6 +22,14 @@ struct StandardHomeView: View {
     @State private var deletingID: UUID?
     @State private var prePopID: UUID? // for tiny overshoot before pop
 
+    // Compute 5 most recent standard estimates
+    private var recentStandardEstimates: [Estimate] {
+        store.standardEstimates
+            .sorted(by: { $0.createdAt > $1.createdAt })
+            .prefix(5)
+            .map { $0 }
+    }
+
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             Group {
@@ -38,8 +46,8 @@ struct StandardHomeView: View {
                 } else {
                     // Use List to enable native swipe-to-delete
                     List {
-                        Section("Saved Estimates") {
-                            ForEach(store.standardEstimates) { estimate in
+                        Section("Recent Estimates") {
+                            ForEach(recentStandardEstimates) { estimate in
                                 NavigationLink {
                                     EstimatorMainView(source: .standard, existingEstimate: estimate)
                                 } label: {

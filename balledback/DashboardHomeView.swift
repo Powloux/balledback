@@ -27,6 +27,14 @@ struct DashboardHomeView: View {
     // Bottom bar height (approximate visual height incl. padding)
     private let bottomBarHeight: CGFloat = 64
 
+    // Compute 5 most recent premium estimates
+    private var recentPremiumEstimates: [Estimate] {
+        store.premiumEstimates
+            .sorted(by: { $0.createdAt > $1.createdAt })
+            .prefix(5)
+            .map { $0 }
+    }
+
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             Group {
@@ -72,8 +80,8 @@ struct DashboardHomeView: View {
                                 .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
                         }
 
-                        Section("Saved Estimates") {
-                            ForEach(store.premiumEstimates) { estimate in
+                        Section("Recent Estimates") {
+                            ForEach(recentPremiumEstimates) { estimate in
                                 Button {
                                     // Route edit via router so it pushes on the container’s NavigationStack
                                     router.openEdit(estimate)
