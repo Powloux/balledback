@@ -86,7 +86,7 @@ struct DashboardHomeView: View {
                                     // Route edit via router so it pushes on the container’s NavigationStack
                                     router.openEdit(estimate)
                                 } label: {
-                                    HStack {
+                                    HStack(spacing: 12) {
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text(estimate.jobName).font(.subheadline.weight(.semibold))
                                             if !estimate.jobLocation.isEmpty {
@@ -97,6 +97,17 @@ struct DashboardHomeView: View {
                                             }
                                         }
                                         Spacer()
+                                        // Favorite star
+                                        Button {
+                                            var updated = estimate
+                                            updated.isFavorite.toggle()
+                                            store.update(id: estimate.id, with: updated, from: .premium)
+                                        } label: {
+                                            Image(systemName: estimate.isFavorite ? "star.fill" : "star")
+                                                .foregroundStyle(estimate.isFavorite ? Color.yellow : Color.secondary)
+                                        }
+                                        .buttonStyle(.plain)
+
                                         Image(systemName: "chevron.right")
                                             .foregroundStyle(.tertiary)
                                     }
@@ -471,3 +482,4 @@ private struct OnlineStatusChip: View {
 #Preview {
     NavigationStack { DashboardHomeView().environmentObject(EstimatorStore()) }
 }
+

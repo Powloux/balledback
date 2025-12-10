@@ -39,6 +39,9 @@ struct Estimate: Identifiable, Hashable {
     var threePlusModifiers: [AdvancedModifierItem]?
     var basementModifiers: [AdvancedModifierItem]?
 
+    // New: Favorite flag
+    var isFavorite: Bool
+
     init(
         id: UUID = UUID(),
         createdAt: Date = Date(),
@@ -60,7 +63,8 @@ struct Estimate: Identifiable, Hashable {
         groundModifiers: [AdvancedModifierItem]? = nil,
         secondModifiers: [AdvancedModifierItem]? = nil,
         threePlusModifiers: [AdvancedModifierItem]? = nil,
-        basementModifiers: [AdvancedModifierItem]? = nil
+        basementModifiers: [AdvancedModifierItem]? = nil,
+        isFavorite: Bool = false
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -87,5 +91,8 @@ struct Estimate: Identifiable, Hashable {
         self.secondModifiers = secondModifiers
         self.threePlusModifiers = threePlusModifiers
         self.basementModifiers = basementModifiers
+
+        self.isFavorite = isFavorite
     }
 }
+

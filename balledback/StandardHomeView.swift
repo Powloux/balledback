@@ -51,17 +51,33 @@ struct StandardHomeView: View {
                                 NavigationLink {
                                     EstimatorMainView(source: .standard, existingEstimate: estimate)
                                 } label: {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(estimate.jobName)
-                                            .font(.subheadline.weight(.semibold))
-                                        if !estimate.jobLocation.isEmpty {
-                                            Text(estimate.jobLocation)
-                                                .foregroundStyle(.secondary)
+                                    HStack(spacing: 12) {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(estimate.jobName)
+                                                .font(.subheadline.weight(.semibold))
+                                            if !estimate.jobLocation.isEmpty {
+                                                Text(estimate.jobLocation)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                            if !estimate.phoneNumber.isEmpty {
+                                                Text(estimate.phoneNumber)
+                                                    .foregroundStyle(.secondary)
+                                            }
                                         }
-                                        if !estimate.phoneNumber.isEmpty {
-                                            Text(estimate.phoneNumber)
-                                                .foregroundStyle(.secondary)
+                                        Spacer()
+                                        // Favorite star
+                                        Button {
+                                            var updated = estimate
+                                            updated.isFavorite.toggle()
+                                            store.update(id: estimate.id, with: updated, from: .standard)
+                                        } label: {
+                                            Image(systemName: estimate.isFavorite ? "star.fill" : "star")
+                                                .foregroundStyle(estimate.isFavorite ? Color.yellow : Color.secondary)
                                         }
+                                        .buttonStyle(.plain)
+
+                                        Image(systemName: "chevron.right")
+                                            .foregroundStyle(.tertiary)
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(.vertical, 6)
@@ -215,3 +231,4 @@ struct StandardHomeView: View {
 #Preview {
     NavigationStack { StandardHomeView().environmentObject(EstimatorStore()) }
 }
+
