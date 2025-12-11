@@ -14,5 +14,6 @@ struct CustomersHomeView: View {
             .padding()
         }
         .navigationTitle("Customers")
+        .navigationBarBackButtonHidden(true)
     }
 }

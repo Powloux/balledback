@@ -65,16 +65,19 @@ struct StandardHomeView: View {
                                             }
                                         }
                                         Spacer()
-                                        // Favorite star
-                                        Button {
-                                            var updated = estimate
-                                            updated.isFavorite.toggle()
-                                            store.update(id: estimate.id, with: updated, from: .standard)
-                                        } label: {
-                                            Image(systemName: estimate.isFavorite ? "star.fill" : "star")
-                                                .foregroundStyle(estimate.isFavorite ? Color.yellow : Color.secondary)
-                                        }
-                                        .buttonStyle(.plain)
+
+                                        // Status bubble (placeholder)
+                                        Text("Status")
+                                            .font(.footnote.weight(.semibold))
+                                            .foregroundStyle(.blue)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 6)
+                                            .background(
+                                                Capsule().fill(Color.blue.opacity(0.12))
+                                            )
+                                            .overlay(
+                                                Capsule().stroke(Color.blue.opacity(0.35), lineWidth: 0.5)
+                                            )
 
                                         Image(systemName: "chevron.right")
                                             .foregroundStyle(.tertiary)
@@ -231,4 +234,3 @@ struct StandardHomeView: View {
 #Preview {
     NavigationStack { StandardHomeView().environmentObject(EstimatorStore()) }
 }
-

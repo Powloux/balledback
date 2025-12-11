@@ -14,5 +14,6 @@ struct TeamHomeView: View {
             .padding()
         }
         .navigationTitle("Team")
+        .navigationBarBackButtonHidden(true)
     }
 }

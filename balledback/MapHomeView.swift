@@ -14,5 +14,6 @@ struct MapHomeView: View {
             .padding()
         }
         .navigationTitle("Map")
+        .navigationBarBackButtonHidden(true)
     }
 }
